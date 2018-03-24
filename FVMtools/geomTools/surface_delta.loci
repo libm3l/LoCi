@@ -1,0 +1,62 @@
+//#############################################################################
+//#
+//# Copyright 2015, Mississippi State University
+//#
+//# This file is part of the Loci Framework.
+//#
+//# The Loci Framework is free software: you can redistribute it and/or modify
+//# it under the terms of the Lesser GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The Loci Framework is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# Lesser GNU General Public License for more details.
+//#
+//# You should have received a copy of the Lesser GNU General Public License
+//# along with the Loci Framework.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+#include <iostream>
+#include <string>
+$include "FVM.lh"
+#include "geomRep.h"
+using namespace Loci::kdTree;
+using std::vector ;
+using std::ifstream ;
+
+using std::cerr ;
+using std::endl ;
+using std::cout ;
+
+typedef  Loci::vector3d<double> vect3d;
+$type surfaceDeltas store<vect3d> ;
+$type geomfile_par param<std::string>;
+
+
+//this rule read in the geometry file, and compute the surfaceDelta of boundary nodes 
+$rule pointwise(surfaceDeltas<-pos,geomfile_par ),constraint(boundary_nodes),
+  option(disable_threading),
+  prelude {
+
+  geomRep::surfaceGeometry geom ;
+  if(Loci::MPI_rank==0) {
+    if(!geom.readASCIIFile(*$geomfile_par)) {
+      cerr << "problem reading " <<*$geomfile_par << endl ;
+      Loci::Abort() ;
+    }
+    cout << "read in " << geom.getNumFaces() << " facets from geometry file '" << *$geomfile_par << "'" << endl ;
+  }
+  geom.broadcastGeometry(0,MPI_COMM_WORLD) ;
+  entitySet dom = entitySet(seq) ;
+  FORALL(dom,ii) {
+    //find the closest point
+    vect3d P = $pos[ii];
+    vect3d n ;
+    vect3d newP = geom.projectGeometryLinear(P, n) ;
+    $surfaceDeltas[ii] = newP - P ;
+  } ENDFORALL ;
+} ;
+

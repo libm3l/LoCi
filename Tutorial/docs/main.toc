@@ -1,0 +1,59 @@
+\contentsline {chapter}{\numberline {1}An Introduction to Loci}{1}
+\contentsline {chapter}{\numberline {2} Basic Concepts }{3}
+\contentsline {section}{\numberline {2.1}Notation used in this document}{3}
+\contentsline {section}{\numberline {2.2} Compiling {\it Loci} Programs }{3}
+\contentsline {section}{\numberline {2.3}{\it Loci} Initialization}{3}
+\contentsline {section}{\numberline {2.4}Entities, Sets, and Sequences}{4}
+\contentsline {section}{\numberline {2.5}{\it Loci} Containers}{11}
+\contentsline {section}{\numberline {2.6}{\it Loci} Relations}{12}
+\contentsline {section}{\numberline {2.7}Databases within {\it Loci}}{13}
+\contentsline {section}{\numberline {2.8}{\it Loci} Helper Classes}{14}
+\contentsline {section}{\numberline {2.9}The {\tt options\_list} class}{17}
+\contentsline {chapter}{\numberline {3}A Simple Example}{21}
+\contentsline {section}{\numberline {3.1}A Finite Volume Solution}{22}
+\contentsline {section}{\numberline {3.2}On Problem Specification}{24}
+\contentsline {section}{\numberline {3.3}On Specification of Process}{25}
+\contentsline {section}{\numberline {3.4}On Interpreting the Problem Specification}{26}
+\contentsline {section}{\numberline {3.5}Creating the Fact Database}{26}
+\contentsline {section}{\numberline {3.6}Creating the rule database}{29}
+\contentsline {subsection}{\numberline {3.6.1}Specifying User Tunable Inputs}{29}
+\contentsline {subsection}{\numberline {3.6.2}Basic Rule Specification}{30}
+\contentsline {subsection}{\numberline {3.6.3}Boundary Conditions and Constraints}{31}
+\contentsline {subsection}{\numberline {3.6.4}Specifying Iterating Algorithms}{31}
+\contentsline {subsection}{\numberline {3.6.5}Next Step: Global Reductions}{33}
+\contentsline {subsection}{\numberline {3.6.6}The {\it Loci} Generated Schedule}{34}
+\contentsline {subsection}{\numberline {3.6.7}Local Reductions: An Alternative}{36}
+\contentsline {subsection}{\numberline {3.6.8}Getting Sophisticated: Parametric Rules}{37}
+\contentsline {subsection}{\numberline {3.6.9}Iterations and Parametric Rules}{39}
+\contentsline {chapter}{\numberline {4}A Three Dimensional Solver}{43}
+\contentsline {section}{\numberline {4.1}Using the Loci finite-volume module}{44}
+\contentsline {subsection}{\numberline {4.1.1} Setting boundary conditions}{46}
+\contentsline {subsection}{\numberline {4.1.2} Creating matrix data-structures}{47}
+\contentsline {section}{\numberline {4.2}Computing the residual function}{47}
+\contentsline {section}{\numberline {4.3}Assembling the matrix}{49}
+\contentsline {subsection}{\numberline {4.3.1}And now the assembly}{51}
+\contentsline {section}{\numberline {4.4}Performing the time integration}{54}
+\contentsline {section}{\numberline {4.5}Closing the equations}{55}
+\contentsline {section}{\numberline {4.6}Creating plot files}{56}
+\contentsline {section}{\numberline {4.7}Running the solver}{58}
+\contentsline {chapter}{\numberline {5}Using storeVec and storeMat}{59}
+\contentsline {chapter}{\numberline {6}Debugging Hints}{61}
+\contentsline {chapter}{\numberline {A} Makefile Example}{63}
+\contentsline {chapter}{\numberline {B}The {\tt fvm} Module Services}{65}
+\contentsline {section}{\numberline {B.1}Grid Metrics}{65}
+\contentsline {section}{\numberline {B.2}Spatial Gradients}{65}
+\contentsline {section}{\numberline {B.3}Face Extrapolations}{65}
+\contentsline {section}{\numberline {B.4}Nodal Interpolations}{66}
+\contentsline {section}{\numberline {B.5}Linear System Solvers}{66}
+\contentsline {section}{\numberline {B.6}Basic Norms}{66}
+\contentsline {chapter}{\numberline {C}Datatypes}{67}
+\contentsline {section}{\numberline {C.1}Introduction}{67}
+\contentsline {section}{\numberline {C.2}Classification of Datatypes}{67}
+\contentsline {section}{\numberline {C.3}Predefined Datatypes in Loci}{68}
+\contentsline {section}{\numberline {C.4}Creating your own compound datatypes}{69}
+\contentsline {section}{\numberline {C.5}Creating User Defined Datatype}{70}
+\contentsline {section}{\numberline {C.6}Inner Details about Compound Datatype}{73}
+\contentsline {subsection}{\numberline {C.6.1}Creating compound datatype with only atomic datatypes}{73}
+\contentsline {subsection}{\numberline {C.6.2}Creating compound datatype with arrays}{74}
+\contentsline {subsection}{\numberline {C.6.3}Creating compound datatype with nested compound datatypes}{75}
+\contentsline {section}{\numberline {C.7}Array Datatype}{76}
