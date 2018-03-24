@@ -1,4 +1,12 @@
 
+The Loci framework provides an automatically parallelizing framework for numerical applications. Applications are 
+represented as a database of rules and the framework generates schedules of rules to execute applications.
+
+This repo is a copy of original Ed Luke's repo which can be found at https://sourceforge.net/projects/loci-framework
+The version which was used to initialize this git repo is Loci-4.0-beta-9.tgz
+
+---------------------------------------------------------------------------------
+
 The source code in the ParMetis-4.0 directory is provided by the
 University of Minnesota and is provided here as an installation
 convenience.  See
