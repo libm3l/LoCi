@@ -22,7 +22,7 @@
 
 namespace Loci {
   
-  const char *revision_name = "$Name: rel-4-0-beta-9 $" ;
+  const char *revision_name = "$Name: rel-4-0-beta-10 $" ;
 
   std::string version() {
     const char *p = revision_name;
