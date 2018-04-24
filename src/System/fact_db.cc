@@ -748,6 +748,7 @@ namespace Loci {
           
           variable var(vname) ;
           if(read_vars.inSet(var)) {
+            if(Loci::MPI_rank == 0)
             cerr << "WARNING: Redefining variable '" << var << "' while reading in fact_db!!!!!" << endl ;
           }
           read_vars += var ;
