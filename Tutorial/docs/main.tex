@@ -1048,14 +1048,14 @@ $type u store<float> ; // Solution variable
 
 Now we can specify rules 7 and 8 in a straightforward manner as follows:
 \begin{verbatim}
-// Rule 7: initialization of iteration (build rule)
-$rule pointwise(u{n=0}<-xc) {
-  $u{n=0} = f($xc) ;
-}
-
-// Rule 8: time advance using explicit Euler time integration algorithm
+// Rule 7: time advance using explicit Euler time integration algorithm
 $rule pointwise(u{n+1}<-u{n},dt{n},R{n}) {
   $u{n+1} = $u{n}+$dt{n}*$R{n} ;
+}
+
+// Rule 8: initialization of iteration (build rule)
+$rule pointwise(u{n=0}<-xc) {
+  $u{n=0} = f($xc) ;
 }
 \end{verbatim}
 
