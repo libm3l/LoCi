@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -217,7 +217,10 @@ public:
     return s ;
   }
 } ;
-  
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#endif
 template<class T> class funclist : public parsebase {
 public:
   list<T> flist ;
@@ -268,7 +271,9 @@ public:
   }
 } ;
   
-
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 template<class T> class templlist : public parsebase {
 public:
   list<T> flist ;

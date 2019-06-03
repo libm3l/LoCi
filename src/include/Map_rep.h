@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -26,7 +26,6 @@
 #endif
 #include <Config/conf.h>
 
-
 #include <store_rep.h>
 
 namespace Loci {
@@ -46,6 +45,7 @@ namespace Loci {
     virtual void compose(const dMap &m, const entitySet &context) = 0 ;
     virtual store_type RepType() const ;
     virtual storeRepP expand(entitySet &out_of_dom, std::vector<entitySet> &init_ptn) = 0 ;
+    virtual storeRepP MapRemap(const dMap &dm, const dMap &im) const = 0 ;
     virtual void shift(int_type)
     {std::cerr<<"shift for Map has not been implemented!"<<std::endl ;}
     int getRangeKeySpace() const { return rangeKeySpace ; }

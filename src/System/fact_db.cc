@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -55,10 +55,11 @@ namespace Loci {
   fact_db::fact_db() {
     distributed_info = 0 ;
     maximum_allocated = factdb_allocated_base+0 ;
-    minimum_allocated = factdb_allocated_base-1 ;
+    vector<entitySet> baseline_ptn ;
     for(int i = 0; i < MPI_processes; ++i) {
-      init_ptn.push_back(EMPTY) ;
+      baseline_ptn.push_back(EMPTY) ;
     }
+    init_ptn.push_back(baseline_ptn) ;
     //    exec_current_fact_db = this;
     dist_from_start = 0 ;
     constraint EMPTY_constraint ;
@@ -74,10 +75,11 @@ namespace Loci {
   void
   fact_db::copy_all_from(const fact_db& f) {
     init_ptn = f.init_ptn ;
+    gmax_alloc = f.gmax_alloc ;
+    keyDomainName = f.keyDomainName ;
     global_comp_entities = f.global_comp_entities ;
     synonyms = f.synonyms ;
     maximum_allocated = f.maximum_allocated ;
-    minimum_allocated = f.minimum_allocated ;
     dist_from_start = f.dist_from_start ;
     fmap = f.fmap ;
     tmap = f.tmap ;
@@ -132,16 +134,29 @@ namespace Loci {
     df->isDistributed = fdf->isDistributed ;
     // we make a deep copy of the maps
     entitySet l2g_alloc = fdf->l2g.domain() ;
-    entitySet g2l_alloc = fdf->g2l.domain() ;
     df->l2g.allocate(l2g_alloc) ;
-    df->g2l.allocate(g2l_alloc) ;
+    df->key_domain.allocate(l2g_alloc) ;
     for(entitySet::const_iterator ei=l2g_alloc.begin();
         ei!=l2g_alloc.end();++ei) {
       df->l2g[*ei] = fdf->l2g[*ei] ;
+      df->key_domain[*ei] = fdf->key_domain[*ei] ;
     }
-    for(entitySet::const_iterator ei=g2l_alloc.begin();
-        ei!=g2l_alloc.end();++ei)
-      df->g2l[*ei] = fdf->g2l[*ei] ;
+
+    // num_keydomains
+    int num_keydomains = fdf->g2lv.size() ; ;
+    df->g2lv = vector<dMap>(num_keydomains) ;
+    for(int i=0;i<num_keydomains;++i) {
+      dMap tmp ;
+      df->g2lv[i].setRep(tmp.Rep()) ;
+    }
+
+    for(int i=0;i<num_keydomains;++i) {
+      entitySet g2l_alloc = fdf->g2lv[i].domain() ;
+      df->g2lv[i].allocate(g2l_alloc) ;
+      for(entitySet::const_iterator ei=g2l_alloc.begin();
+	  ei!=g2l_alloc.end();++ei)
+	df->g2lv[i][*ei] = fdf->g2lv[i][*ei] ;
+    }
     df->my_entities = fdf->my_entities ;
     df->comp_entities = fdf->comp_entities ;
     df->copy = fdf->copy ;
@@ -149,16 +164,38 @@ namespace Loci {
     df->copy_total_size = fdf->copy_total_size ;
     df->xmit_total_size = fdf->xmit_total_size ;
     //      df->remap = fdf->remap ;
-    df->g2f = fdf->g2f ;
+#ifdef LOCI_COMPAT_MODE1
+    df->g2fv = fdf->g2fv ;
+    df->g2l.setRep(df->g2lv[0].Rep()) ;
+    df->g2f.setRep(df->g2fv[0].Rep()) ;
+#endif
   }
   
   void fact_db::set_maximum_allocated(int i) {
     maximum_allocated = i ;
   }
-  void fact_db::set_minimum_allocated(int i) {
-    minimum_allocated = i ;
-  }
   
+  int fact_db::getKeyDomain(std::string name) {
+    for(size_t i=0;i<keyDomainName.size();++i)
+      if(name == keyDomainName[i])
+	return i ;
+    gmax_alloc.push_back(maximum_allocated) ;
+    keyDomainName.push_back(name) ;
+    if(dist_from_start) {
+      while(distributed_info->g2fv.size() < keyDomainName.size())
+	distributed_info->g2fv.push_back(dMap()) ;
+      while(distributed_info->g2lv.size() < keyDomainName.size())
+	distributed_info->g2lv.push_back(dMap()) ;
+    }
+    vector<entitySet> baseline_ptn ;
+    for(int i = 0; i < MPI_processes; ++i) {
+      baseline_ptn.push_back(EMPTY) ;
+    }
+    while(init_ptn.size() < keyDomainName.size())
+      init_ptn.push_back(baseline_ptn) ;
+    return keyDomainName.size()-1 ;
+  }
+
   void fact_db::synonym_variable(variable v, variable synonym) {
     // Find all variables that should be synonymous with v
     variableSet synonym_set ;
@@ -213,7 +250,10 @@ namespace Loci {
     //if st is STORE or MAP, update maximum_allocated
     if(st->RepType() == Loci::MAP || st->RepType() == Loci::STORE) {
       int max_val = st->domain().Max() ;
-      maximum_allocated = max(maximum_allocated,max_val+1) ;
+      if(gmax_alloc.size()==0)
+	getKeyDomain("Main") ;
+      int kd = st->getDomainKeySpace() ;
+      gmax_alloc[kd] = max(gmax_alloc[kd],max_val+1) ;
     }
     //add namespace
     variable tmp_v = add_namespace(v) ;
@@ -244,7 +284,10 @@ namespace Loci {
     
     if(st->RepType() == Loci::MAP || st->RepType() == Loci::STORE) {
       int max_val = st->domain().Max() ;
-      maximum_allocated = max(maximum_allocated,max_val+1) ;
+      if(gmax_alloc.size()==0)
+	getKeyDomain("Main") ;
+      int kd = st->getDomainKeySpace() ;
+      gmax_alloc[kd] = max(gmax_alloc[kd],max_val+1) ;
     }
     variable tmp_v ;
     tmp_v = v ;
@@ -273,7 +316,6 @@ namespace Loci {
       fmap[tmp_v].data_rep = new store_ref ;
       fmap[tmp_v].data_rep->setRep(st->getRep()) ;
     }
-    // cout << " tmp_v = " << tmp_v << endl ;
   } 
 
   /*! remove from synonym and fmap */
@@ -331,27 +373,46 @@ namespace Loci {
       extensional_facts -= v ;
   }
 
-  std::pair<entitySet, entitySet> fact_db::get_dist_alloc(int size) {
+  int fact_db::get_max_alloc(int kd) {
+    if(gmax_alloc.size() == 0) {
+      getKeyDomain("Main") ;
+    }
+    return gmax_alloc[kd] ;
+  }
+  std::pair<entitySet, entitySet> fact_db::get_dist_alloc(int size, size_t kd) {
 
+    if(gmax_alloc.size() == 0) {
+      getKeyDomain("Main") ;
+    }
     if(MPI_processes > 1) {
       if(!dist_from_start) {
 	dist_from_start = 1 ;
 	distributed_info = new distribute_info;
+	int num_keyspace = gmax_alloc.size() ;
+	for(int i=0;i<num_keyspace;++i) {
+	  distributed_info->g2fv.push_back(dMap()) ;
+	  distributed_info->g2lv.push_back(dMap()) ;
+	}
+#ifdef LOCI_COMPAT_MODE1
+	distributed_info->g2f.setRep(distributed_info->g2fv[0].Rep()) ;
+	distributed_info->g2l.setRep(distributed_info->g2lv[0].Rep()) ;
+#endif
       }
+
 
       int* send_buf = new int[MPI_processes] ;
       int* size_send = new int[MPI_processes] ;
       int* size_recv = new int[MPI_processes] ;
       int* recv_buf = new int[MPI_processes] ;
       for(int i = 0; i < MPI_processes; ++i) {
-	send_buf[i] = maximum_allocated ;
+	send_buf[i] = gmax_alloc[kd] ;
 	size_send[i] = size ;
       } 
       MPI_Alltoall(send_buf, 1, MPI_INT, recv_buf, 1, MPI_INT, MPI_COMM_WORLD) ;
       MPI_Alltoall(size_send, 1, MPI_INT, size_recv, 1, MPI_INT, MPI_COMM_WORLD) ;
       std::sort(recv_buf, recv_buf+MPI_processes) ;
-      maximum_allocated = recv_buf[MPI_processes-1] ;
-      int local_max = maximum_allocated ;
+      gmax_alloc[kd] = recv_buf[MPI_processes-1] ;
+      int local_max = gmax_alloc[kd] ;
       int global_max = 0 ;
       for(int i = 0; i < MPI_rank; ++i)
 	local_max += size_recv[i] ;
@@ -359,11 +420,11 @@ namespace Loci {
 	global_max += size_recv[i] ;
       
       for(int i = 0 ; i < MPI_processes; ++i) {
-	int local = maximum_allocated ;
+	int local = gmax_alloc[kd] ;
 	for(int j = 0; j < i; ++j)
 	  local += size_recv[j] ;
 	if(size_recv[i] > 0 )
-	  init_ptn[i] += interval(local, local+size_recv[i]-1) ;
+	  init_ptn[kd][i] += interval(local, local+size_recv[i]-1) ;
       }
       entitySet local_ivl, global_ivl ;
       if(size > 0 )
@@ -372,7 +433,7 @@ namespace Loci {
 	local_ivl = EMPTY ;
       }
       
-      global_ivl = entitySet(interval(maximum_allocated, maximum_allocated+global_max-1)) ;
+      global_ivl = entitySet(interval(gmax_alloc[kd], gmax_alloc[kd]+global_max-1)) ;
 
       global_comp_entities += local_ivl;
       
@@ -380,43 +441,47 @@ namespace Loci {
       delete [] recv_buf ;
       delete [] size_send ;
       delete [] size_recv ;
-      maximum_allocated = max(maximum_allocated,global_ivl.Max()+1) ;
+      gmax_alloc[kd] = max(gmax_alloc[kd],global_ivl.Max()+1) ;
       return(make_pair(local_ivl, global_ivl)) ;
     }
-    entitySet alloc = entitySet(interval(maximum_allocated,maximum_allocated+size-1)) ;
-    maximum_allocated += size ;
+    entitySet alloc = entitySet(interval(gmax_alloc[kd],gmax_alloc[kd]+size-1)) ;
+    gmax_alloc[kd] += size ;
     
-    init_ptn[0] += alloc ;
+    init_ptn[kd][0] += alloc ;
     global_comp_entities += alloc;
     return (make_pair(alloc, alloc)) ;
   }
     
-  void fact_db::update_remap(const std::vector<std::pair<int, int> > &remap_update) {
+  void fact_db::update_remap(const std::vector<std::pair<int, int> > &remap_update, size_t kd) {
     if(Loci::MPI_processes > 1) {
       warn(!dist_from_start);
       fatal(distributed_info == NULL);
       
       for(std::vector<std::pair<int, int> >::const_iterator vi = remap_update.begin(); vi != remap_update.end(); vi++) {
         //	distributed_info->remap[vi->first] = vi->second;
-        distributed_info->g2f[vi->second] = vi->first ;
+        distributed_info->g2fv[kd][vi->second] = vi->first ;
       }
+#ifdef LOCI_COMPAT_MODE1
+      distributed_info->g2f.setRep(distributed_info->g2fv[0].Rep()) ;
+      //      distributed_info->g2l.setRep(distributed_info->g2lv[0].Rep()) ;
+#endif
     }
   }
 
-  std::pair<entitySet, entitySet> fact_db::get_distributed_alloc(int size) {
-    pair<entitySet, entitySet> allocation = get_dist_alloc(size);
+  std::pair<entitySet, entitySet> fact_db::get_distributed_alloc(int size, size_t kd) {
+    pair<entitySet, entitySet> allocation = get_dist_alloc(size, kd);
     vector<pair<int, int> > remap_update;
    
     FORALL(allocation.first, ai) {
       remap_update.push_back(make_pair(ai, ai));
     }ENDFORALL;
 
-    update_remap(remap_update);    
+    update_remap(remap_update,kd);    
     return allocation;
   }
 
-  std::pair<entitySet, entitySet> fact_db::get_distributed_alloc(const std::vector<int> &remap_entities) {
-    pair<entitySet, entitySet> allocation = get_dist_alloc(remap_entities.size());
+  std::pair<entitySet, entitySet> fact_db::get_distributed_alloc(const std::vector<int> &remap_entities, size_t kd) {
+    pair<entitySet, entitySet> allocation = get_dist_alloc(remap_entities.size(),kd);
     vector<pair<int, int> > remap_update;
     
     int i = 0;   
@@ -425,19 +490,19 @@ namespace Loci {
       i++;
     }ENDFORALL;
 
-    update_remap(remap_update);
+    update_remap(remap_update,kd);
     return allocation;
   }
 
-  std::pair<entitySet, entitySet> fact_db::get_distributed_alloc(int size, int offset) {  
-    pair<entitySet, entitySet> allocation = get_dist_alloc(size);
+  std::pair<entitySet, entitySet> fact_db::get_distributed_alloc(int size, int offset,size_t kd) {  
+    pair<entitySet, entitySet> allocation = get_dist_alloc(size,kd);
     vector<pair<int, int> > remap_update;
     
     FORALL(allocation.first, ai) {
       remap_update.push_back(make_pair(ai+offset, ai));
     }ENDFORALL;
     
-    update_remap(remap_update);
+    update_remap(remap_update,kd);
     return allocation;
   }
   
@@ -447,8 +512,6 @@ namespace Loci {
     std::map<variable, fact_info>::iterator mi =
       fmap.find(remove_synonym(tmp_v)) ;
     if(mi == fmap.end()) {
-      //      if(Loci::MPI_rank == 0)
-      //	cout << " returning null  storeRep for variable " << tmp_v<< endl ;
       return storeRepP(0) ;
     }
     else
@@ -748,7 +811,6 @@ namespace Loci {
           
           variable var(vname) ;
           if(read_vars.inSet(var)) {
-            if(Loci::MPI_rank == 0)
             cerr << "WARNING: Redefining variable '" << var << "' while reading in fact_db!!!!!" << endl ;
           }
           read_vars += var ;
@@ -858,12 +920,49 @@ namespace Loci {
   
   void reorder_facts(fact_db &facts, dMap &remap) {
     variableSet vars = facts.get_typed_variables() ;
-    for(variableSet::const_iterator vi=vars.begin();vi!=vars.end();++vi) {
-      storeRepP  p = facts.get_variable(*vi) ;
-      if(facts.is_distributed_start())
-        facts.replace_fact(*vi,(p->remap(remap))->freeze()) ;
-      else
-        facts.update_fact(*vi,(p->remap(remap))->freeze()) ;
+    if(facts.is_distributed_start()) {
+      fact_db::distribute_infoP df = facts.get_distribute_info()  ;
+      for(variableSet::const_iterator vi=vars.begin();vi!=vars.end();++vi) {
+	storeRepP p = facts.get_variable(*vi) ;
+	if(p->domain() == ~EMPTY) {
+	  // For universal set, keep set universal
+	  facts.replace_fact(*vi,p->freeze()) ;
+	  p = facts.get_variable(*vi) ;
+	} else if(p->RepType() != Loci::MAP) {
+	  int kd = p->getDomainKeySpace() ;
+	  entitySet rdom = p->domain() & df->g2lv[kd].domain() ;
+	  storeRepP fp = (p->remap(df->g2lv[kd]))->freeze() ;
+	  facts.replace_fact(*vi,fp) ;
+	  p = facts.get_variable(*vi) ;
+	} else {
+	  MapRepP mp = MapRepP(p->getRep()) ;
+	  int kd = p->getDomainKeySpace() ;
+	  int rd = mp->getRangeKeySpace() ;
+	  storeRepP fp = (mp->MapRemap(df->g2lv[kd],
+				       df->g2lv[rd]))->freeze() ;
+	  facts.replace_fact(*vi,fp) ;
+	  p = facts.get_variable(*vi) ;
+	  mp = MapRepP(p->getRep()) ;
+	}
+      }
+#ifdef LOCI_COMPAT_MODE1
+      df->g2f.setRep(df->g2fv[0].Rep()) ;
+      df->g2l.setRep(df->g2lv[0].Rep()) ;
+#endif
+
+    } else {
+      for(variableSet::const_iterator vi=vars.begin();vi!=vars.end();++vi) {
+	storeRepP p = facts.get_variable(*vi) ;
+	if(p->domain() == ~EMPTY) {
+	  // For universal set, keep set universal
+	  facts.update_fact(*vi,p->freeze()) ;
+	} else if(p->RepType() != Loci::MAP) {
+	  facts.update_fact(*vi,(p->remap(remap))->freeze()) ;
+	} else {
+	  MapRepP mp = MapRepP(p->getRep()) ;
+	  facts.update_fact(*vi,(mp->MapRemap(remap,remap))->freeze()) ;
+	}
+      }
     }
   }
 
@@ -973,7 +1072,7 @@ namespace Loci {
   
   void
   fact_db::init_key_manager() {
-    int max_alloc = get_max_alloc() ;
+    int max_alloc = get_max_alloc(0) ;
     int global_max = 0 ;
     MPI_Allreduce(&max_alloc, &global_max, 1,
                   MPI_INT, MPI_MAX, MPI_COMM_WORLD) ;

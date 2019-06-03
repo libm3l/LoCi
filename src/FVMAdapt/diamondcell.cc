@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -286,6 +286,11 @@ void DiamondCell::empty_split(){
     childCell[i] = new DiamondCell(3);
   }
 };
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wchar-subscripts"
+#endif
 
 //this function return my sibling neighbor, mf is my faceID,
 //nf is neighbor's faceId 
@@ -1503,3 +1508,6 @@ void DiamondCell::derefine(){
   }
 }
  
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif

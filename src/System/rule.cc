@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -648,6 +648,7 @@ namespace Loci {
         if(crp == 0) {
           Loci::constraint mapc ;
           *mapc = srp->domain() ;
+	  mapc.Rep()->setDomainKeySpace(srp->getDomainKeySpace()) ;
           // install it in fact_db
           facts.create_fact(new_name, mapc) ;
         }

@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -44,6 +44,8 @@ using std::cout ;
 #define vect3d vector3d<double>
 
 namespace Loci{
+  extern int getKeyDomain(entitySet dom, fact_db::distribute_infoP dist, MPI_Comm comm) ;
+  extern  bool useDomainKeySpaces  ;
   // Convert container from local numbering to file numbering
   // pass in store rep pointer: sp
   // entitySet to write: dom
@@ -78,12 +80,12 @@ namespace Loci{
       return nm.Rep() ;
     }
     
-    vector<entitySet> init_ptn = facts.get_init_ptn() ;
+    vector<entitySet> init_ptn = facts.get_init_ptn(0) ;// FIX THIS
     fact_db::distribute_infoP df = facts.get_distribute_info() ;
     Map l2g ;
     l2g = df->l2g.Rep() ;
     dMap g2f ;
-    g2f = df->g2f.Rep() ;
+    g2f = df->g2fv[0].Rep() ;// FIX THIS
 
     entitySet gnodes = l2g.image(nodes&l2g.domain()) ;
     entitySet gset = findBoundingSet(gnodes) ;
@@ -714,7 +716,7 @@ namespace Loci{
     entitySet boundaries = boundary_names.domain() ;
     if(MPI_processes > 1) {
       entitySet local_boundaries ;
-      std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
+      std::vector<entitySet> init_ptn = facts.get_init_ptn(0) ; // FIX THIS
       Map l2g ;
       fact_db::distribute_infoP df = facts.get_distribute_info() ;
       l2g = df->l2g.Rep() ;
@@ -750,6 +752,29 @@ namespace Loci{
     entitySet  fset = (MapRepP(boundary_mapRep)->image(localCells)+
                        MapRepP(upperRep)->image(localCells)) & ref.domain() ;
 
+    Map l2g ;
+    dMap g2f ;
+    if(MPI_processes > 1) {
+      fact_db::distribute_infoP df = facts.get_distribute_info() ;
+      int kd =  getKeyDomain(fset, df, MPI_COMM_WORLD) ;
+      
+      if(kd < 0) {
+	cerr << "gridTopology, boundary faces not in single keyspace!"
+	     << endl ;
+	kd = 0 ;
+      }
+      //      debugout << "in write gridTopology, face key domain is " << kd
+      //	       << endl ;
+      l2g = df->l2g.Rep() ;
+      g2f = df->g2fv[kd].Rep() ;
+    } else {
+      l2g.allocate(fset) ;
+      FORALL(fset,fc) {
+	l2g[fc] = fc ;
+	g2f[fc] = fc ;
+      } ENDFORALL ;
+    }
+
     for(size_t i=0;i<bnamelist.size();++i) {
       hid_t bc_id = 0 ;
       string current_bc = bnamelist[i] ;
@@ -775,19 +800,6 @@ namespace Loci{
           if(ref[fc] == id)
             bfaces+= fc ;
         }ENDFORALL ;
-      }
-      Map l2g ;
-      dMap g2f ;
-      if(MPI_processes > 1) {
-        fact_db::distribute_infoP df = facts.get_distribute_info() ;
-        l2g = df->l2g.Rep() ;
-        g2f = df->g2f.Rep() ;//why no map expanding? 
-      } else {
-        l2g.allocate(bfaces) ;
-        FORALL(bfaces,fc) {
-          l2g[fc] = fc ;
-          g2f[fc] = fc ;
-        } ENDFORALL ;
       }
       
       int ntria=0, nquad=0, nsided =0;
@@ -867,7 +879,7 @@ namespace Loci{
     entitySet boundaries = boundary_names.domain() ;
     if(MPI_processes > 1) {
       entitySet local_boundaries ;
-      std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
+      std::vector<entitySet> init_ptn = facts.get_init_ptn(0) ; // FIX THIS
       Map l2g ;
       fact_db::distribute_infoP df = facts.get_distribute_info() ;
       l2g = df->l2g.Rep() ;
@@ -1447,6 +1459,7 @@ namespace Loci{
     // it from face2node on this processor.
     multiMap face2node ;
     face2node = facts.get_variable("face2node") ;
+    int fk = face2node.Rep()->getDomainKeySpace() ;
     entitySet f2n_image = MapRepP(face2node.Rep())->image(face2node.domain()) ;
     entitySet out_of_dom = f2n_image - pos.domain() ;
     dstore<vector3d<double> > tmp_pos ;
@@ -1457,7 +1470,8 @@ namespace Loci{
     int tmp_out = out_of_dom.size() ;
     std::vector<entitySet> init_ptn ;
     if(facts.is_distributed_start()) {
-      init_ptn = facts.get_init_ptn() ;
+      int pk = pos.Rep()->getDomainKeySpace() ;
+      init_ptn = facts.get_init_ptn(pk) ;
       if(GLOBAL_OR(tmp_out)) 
         fill_clone(sp, out_of_dom, init_ptn) ;
     }
@@ -1555,7 +1569,7 @@ namespace Loci{
       storeRepP sp = check.Rep() ;
       std::vector<entitySet> init_ptn ;
       if(facts.is_distributed_start()) {
-        init_ptn = facts.get_init_ptn() ;
+        init_ptn = facts.get_init_ptn(fk) ; 
         fill_clone(sp, p1map, init_ptn) ;
       }
       bool periodic_problem = false ;
@@ -1570,8 +1584,9 @@ namespace Loci{
       }
     }
 
-
     // Add periodic datastructures to fact database
+    pmap.Rep()->setDomainKeySpace(fk) ;
+    MapRepP(pmap.Rep())->setRangeKeySpace(fk) ;
     facts.create_fact("pmap",pmap) ;
     facts.create_fact("periodicTransform",periodic_transform) ;
 
@@ -1600,6 +1615,7 @@ namespace Loci{
     constraint boundary_faces ;
     boundary_faces = facts.get_variable("boundary_faces") ;
     entitySet ci_faces = *boundary_faces ;
+
     storeRepP pfacesP = facts.get_variable("periodicFaces") ;
     if(pfacesP != 0) {
       constraint periodicFaces ;
@@ -1616,6 +1632,7 @@ namespace Loci{
     FORALL(ci_faces,fc) {
       ci[fc] = cl[fc] ;
     } ENDFORALL ;
+    ci.Rep()->setDomainKeySpace(cl.Rep()->getDomainKeySpace()) ;
     facts.create_fact("ci",ci) ;
     debugout << "boundary_faces = " << *boundary_faces << endl ;
     debugout << "ci_faces = " << ci_faces << endl ;
@@ -1645,6 +1662,7 @@ namespace Loci{
     ref = facts.get_variable("ref") ;
     entitySet dom = boundary_names.domain() ;
     dom = all_collect_entitySet(dom) ;
+    int fk = ref.Rep()->getDomainKeySpace() ;
     
     param<options_list> bc_info ;
     tmp = facts.get_variable("boundary_conditions") ;
@@ -1675,6 +1693,7 @@ namespace Loci{
 
       constraint bconstraint ;
       *bconstraint = bfaces ;
+      bconstraint.Rep()->setDomainKeySpace(fk) ;
 
       facts.create_fact(tname,bconstraint) ;
       debugout << "boundary " << bname << "("<< tname << ") = "
@@ -1683,6 +1702,7 @@ namespace Loci{
       *boundarySet = bname ;
       string factname = "boundaryName(" + bname + ")" ;
       boundarySet.set_entitySet(bfaces) ;
+      boundarySet.Rep()->setDomainKeySpace(fk) ;
       facts.create_fact(factname,boundarySet) ;
       
       option_value_type vt =
@@ -1764,6 +1784,7 @@ namespace Loci{
           constraint bc_constraint ;
           bc_constraint = mi->second ;
           std::string constraint_name = mi->first + std::string("_BC") ;
+	  bc_constraint.Rep()->setDomainKeySpace(fk) ;
           facts.create_fact(constraint_name,bc_constraint) ;
           if(MPI_processes == 1)
             std::cout << constraint_name << ' ' << mi->second << endl ;
@@ -1804,6 +1825,7 @@ namespace Loci{
     
     if(periodic_data.size() != 0) {
       periodic_faces = periodic ;
+      periodic_faces.Rep()->setDomainKeySpace(fk) ;
       facts.create_fact("periodicFaces",periodic_faces) ;
 
       list<pair<periodic_info,periodic_info> > periodic_list ;
@@ -1868,6 +1890,7 @@ namespace Loci{
     allfaces = facts.get_variable("faces") ;
     no_symmetry  = *allfaces - symmetry ;
     no_symmetry_BC = no_symmetry ;
+    no_symmetry_BC.Rep()->setDomainKeySpace(fk) ;
     facts.create_fact("no_symmetry_BC",no_symmetry_BC) ;
 
     facts.create_fact("BC_options",BC_options) ;
@@ -1876,6 +1899,465 @@ namespace Loci{
     
   }
 
+  // Create Cell Stencil Plan:
+
+  // Get relations from face2cell and face2node
+  // Join to get node2cell
+  // join node2cell & node2cell to get cell2cell (through shared nodes)
+  // remove self2self references
+  // Convert resulting structure to multiMap
+
+  void getFaceCenter(fact_db &facts, dstore<vector3d<real_t> > &fcenter, dstore<real_t> &area, dstore<vector3d<real_t> > &normal) {
+    // Compute face centers
+    store<vector3d<real_t> > pos ;
+    pos = facts.get_variable("pos") ;
+
+    multiMap face2node ;
+    face2node = facts.get_variable("face2node") ;
+    entitySet fdom = face2node.domain() ;
+    entitySet f2n_image = Loci::MapRepP(face2node.Rep())->image(fdom) ;
+
+    entitySet out_of_dom = f2n_image - pos.domain() ;
+
+    dstore<vector3d<real_t> > tmp_pos ;
+    FORALL(pos.domain(), pi) {
+      tmp_pos[pi] = pos[pi] ;
+    } ENDFORALL ;
+    Loci::storeRepP sp = tmp_pos.Rep() ;
+    int tmp_out = out_of_dom.size() ;
+    std::vector<entitySet> init_ptn ;
+    if(facts.is_distributed_start()) {
+      init_ptn = facts.get_init_ptn() ;
+      if(GLOBAL_OR(tmp_out)) 
+	fill_clone(sp, out_of_dom, init_ptn) ;
+    }
+
+    param<std::string> centroid ;
+    centroid = facts.get_variable("centroid") ;
+    bool exact = false ;
+    if(*centroid == "exact") 
+      exact = true ;
+
+    FORALL(fdom,fc) {
+      int fsz = face2node[fc].size() ;
+      vector3d<real_t>  center = vector3d<real_t> (0,0,0) ;
+      real_t wsum = 0 ;
+	
+      for(int i=1;i<fsz;++i) {
+	real_t len = norm(tmp_pos[face2node[fc][i-1]]-tmp_pos[face2node[fc][i]]) ;
+	vector3d<real_t>  eloc = 0.5*(tmp_pos[face2node[fc][i-1]]+tmp_pos[face2node[fc][i]]) ;
+	center += len*eloc ;
+	wsum += len ;
+      }
+      real_t lenr = norm(tmp_pos[face2node[fc][0]]-tmp_pos[face2node[fc][fsz-1]]) ;
+      vector3d<real_t>  elocr = 0.5*(tmp_pos[face2node[fc][0]]+tmp_pos[face2node[fc][fsz-1]]) ;
+      center += lenr*elocr ;
+      wsum += lenr ;
+      center *= 1./wsum ;
+      fcenter[fc] = center ;
+      if(exact) {	
+	// Iterate to find exact centroid that is on the face
+	vector3d<real_t>  tmpcenter = center ;
+	const int NITER=4 ;
+	for(int iter=0;iter<NITER;++iter) {
+    
+	  // compute centroid using triangles formed by wireframe centroid
+	  vector3d<real_t>  centroidsum(0.0,0.0,0.0) ;
+	  real_t facearea = 0 ;
+	  for(int i=0;i<fsz;++i) {
+	    int n1 = i ;
+	    int n2 = (i+1==fsz)?0:i+1 ;
+	    vector3d<real_t>  p1 = tmp_pos[face2node[fc][n1]] ;
+	    vector3d<real_t>  p2 = tmp_pos[face2node[fc][n2]] ;
+	    
+	    const vector3d<real_t>  t_centroid = (p1 + p2 + tmpcenter)/3.0 ;
+	    const real_t t_area = 0.5*norm(cross(p1-tmpcenter,p2-tmpcenter)) ;
+	    centroidsum += t_area*t_centroid ;
+	    facearea += t_area ;
+	  }
+	  tmpcenter = centroidsum/facearea ;
+	}
+	fcenter[fc] = tmpcenter ;
+      }
+      vector3d<real_t> facearea = vector3d<real_t>(0,0,0) ;
+      vector3d<real_t>  tmpcenter = fcenter[fc] ;
+      for(int i=0;i<fsz;++i) {
+	int n1 = i ;
+	int n2 = (i+1==fsz)?0:i+1 ;
+	vector3d<real_t>  p1 = tmp_pos[face2node[fc][n1]] ;
+	vector3d<real_t>  p2 = tmp_pos[face2node[fc][n2]] ;
+	
+	facearea += cross(p1-tmpcenter,p2-tmpcenter) ;
+      }
+      real_t nfacearea = norm(facearea) ;
+      area[fc] = 0.5*nfacearea ;
+      normal[fc] = (1./nfacearea)*facearea ;
+    } ENDFORALL ;
+  }
+
+  void getCellCenter(fact_db &facts, dstore<vector3d<real_t> > &fcenter,
+		     dstore<vector3d<real_t> > &fnormal,
+		     dstore<vector3d<real_t> > &ccenter) {
+
+    dstore<real_t> area ;
+    getFaceCenter(facts,fcenter,area,fnormal) ;
+    multiMap upper,lower,boundary_map ;
+    upper = facts.get_variable("upper") ;
+    lower = facts.get_variable("lower") ;
+    boundary_map = facts.get_variable("boundary_map") ;
+    entitySet cells = upper.domain()&lower.domain()&boundary_map.domain() ;
+    entitySet faceimage  ;
+    faceimage += Loci::MapRepP(upper.Rep())->image(cells) ;
+    faceimage += Loci::MapRepP(lower.Rep())->image(cells) ;
+    faceimage += Loci::MapRepP(boundary_map.Rep())->image(cells) ;
+    entitySet out_of_dom = faceimage - fcenter.domain() ;
+    int tmp_out = out_of_dom.size() ;
+    std::vector<entitySet> init_ptn ;
+    if(facts.is_distributed_start()) {
+      init_ptn = facts.get_init_ptn() ;
+      if(GLOBAL_OR(tmp_out)) {
+	Loci::storeRepP sp = fcenter.Rep() ;
+	fill_clone(sp, out_of_dom, init_ptn) ;
+	sp = area.Rep() ;
+	fill_clone(sp, out_of_dom, init_ptn) ;
+	sp = fnormal.Rep() ;
+	fill_clone(sp, out_of_dom, init_ptn) ;
+      }
+    }
+    dstore<vector3d<real_t> > wccenter ;
+    // compute wireframe centroid
+    FORALL(cells,cc) {
+      vector3d<real_t>  csum = vector3d<real_t> (0,0,0) ;
+      real_t wsum = 0 ;
+      int lsz = lower[cc].size() ;
+      for(int i=0;i<lsz;++i) {
+	int f = lower[cc][i] ;
+	real_t w = area[f] ;
+	vector3d<real_t>  v = fcenter[f] ;
+	csum += w*v ;
+	wsum += w ;
+      }
+      int usz = upper[cc].size() ;
+      for(int i=0;i<usz;++i) {
+	int f = upper[cc][i] ;
+	real_t w = area[f] ;
+	vector3d<real_t>  v = fcenter[f] ;
+	csum += w*v ;
+	wsum += w ;
+      }
+      int bsz = boundary_map[cc].size() ;
+      for(int i=0;i<bsz;++i) {
+	int f = boundary_map[cc][i] ;
+	real_t w = area[f] ;
+	vector3d<real_t>  v = fcenter[f] ;
+	csum += w*v ;
+	wsum += w ;
+      }
+      csum *= 1./wsum ;
+      wccenter[cc] = csum ;
+      ccenter[cc] = csum ;
+    } ENDFORALL ;
+    param<std::string> centroid ;
+    centroid = facts.get_variable("centroid") ;
+    if(*centroid == "exact")  {
+      // Here we add code to compute exact centroid.
+      // face2node needs to be expanded to do this...
+    }
+    
+  }
+
+  void create_cell_stencil_full(fact_db &facts) {
+    using std::vector ;
+    using std::pair ;
+    Map cl,cr ;
+    multiMap face2node ;
+    cl = facts.get_variable("cl") ;
+    cr = facts.get_variable("cr") ;
+    face2node = facts.get_variable("face2node") ;
+    constraint geom_cells_c ;
+    geom_cells_c = facts.get_variable("geom_cells") ;
+    entitySet geom_cells = *geom_cells_c ;
+    // We need to have all of the geom_cells to do the correct test in the
+    // loop before, so gather with all_collect_entitySet
+    geom_cells = all_collect_entitySet(geom_cells) ;
+    entitySet faces = face2node.domain() ;
+
+    Loci::protoMap f2cell ;
+
+    // Get mapping from face to geometric cells
+    Loci::addToProtoMap(cl,f2cell) ;
+    FORALL(faces,fc) {
+      if(geom_cells.inSet(cr[fc]))
+        f2cell.push_back(pair<int,int>(fc,cr[fc])) ;
+    } ENDFORALL ;
+
+    // Get mapping from face to nodes
+    Loci::protoMap f2node ;
+    Loci::addToProtoMap(face2node,f2node) ;
+
+    // Equijoin on first of pairs to get node to neighboring cell mapping
+    // This will give us a mapping from nodes to neighboring cells
+    Loci::protoMap n2c ;
+    Loci::equiJoinFF(f2node,f2cell,n2c) ;
+
+    // In case there are processors that have no n2c's allocated to them
+    // re-balance map distribution
+    Loci::balanceDistribution(n2c,MPI_COMM_WORLD) ;
+    // Equijoin node2cell with itself to get cell to cell map of
+    // all cells that share one or more nodes
+    Loci::protoMap n2cc = n2c ;
+    Loci::protoMap c2c ;
+    Loci::equiJoinFF(n2c,n2cc,c2c) ;
+
+    // Remove self references
+    Loci::removeIdentity(c2c) ;
+
+    //
+    // Create cell stencil map from protoMap
+    multiMap cellStencil ;
+    std::vector<entitySet> ptn = facts.get_init_ptn() ;
+    distributed_inverseMap(cellStencil,c2c,geom_cells,geom_cells,ptn) ;
+    // Put in fact database
+    facts.create_fact("cellStencil",cellStencil) ;
+  }
+  
+  void create_cell_stencil(fact_db & facts) {
+    using std::vector ;
+    using std::pair ;
+    Map cl,cr ;
+    multiMap face2node ;
+    cl = facts.get_variable("cl") ;
+    cr = facts.get_variable("cr") ;
+    face2node = facts.get_variable("face2node") ;
+    constraint geom_cells_c ;
+    geom_cells_c = facts.get_variable("geom_cells") ;
+    entitySet geom_cells = *geom_cells_c ;
+    // We need to have all of the geom_cells to do the correct test in the
+    // loop before, so gather with all_collect_entitySet
+    geom_cells = all_collect_entitySet(geom_cells) ;
+    entitySet faces = face2node.domain() ;
+
+    Loci::protoMap f2cell ;
+
+    // Get mapping from face to geometric cells
+    Loci::addToProtoMap(cl,f2cell) ;
+    FORALL(faces,fc) {
+      if(geom_cells.inSet(cr[fc]))
+        f2cell.push_back(pair<int,int>(fc,cr[fc])) ;
+    } ENDFORALL ;
+
+    // Get mapping from face to nodes
+    Loci::protoMap f2node ;
+    Loci::addToProtoMap(face2node,f2node) ;
+
+    // Equijoin on first of pairs to get node to neighboring cell mapping
+    // This will give us a mapping from nodes to neighboring cells
+    Loci::protoMap n2c ;
+    Loci::equiJoinFF(f2node,f2cell,n2c) ;
+
+    // In case there are processors that have no n2c's allocated to them
+    // re-balance map distribution
+    Loci::balanceDistribution(n2c,MPI_COMM_WORLD) ;
+    // Equijoin node2cell with itself to get cell to cell map of
+    // all cells that share one or more nodes
+    Loci::protoMap n2cc = n2c ;
+    Loci::protoMap c2c ;
+    Loci::equiJoinFF(n2c,n2cc,c2c) ;
+
+    // Remove self references
+    Loci::removeIdentity(c2c) ;
+
+    //
+    // Create cell stencil map from protoMap
+    multiMap cellStencil ;
+    std::vector<entitySet> ptn = facts.get_init_ptn() ;
+    distributed_inverseMap(cellStencil,c2c,geom_cells,geom_cells,ptn) ;
+
+    // Now downselect cells
+    dstore<vector3d<real_t> > fcenter ;
+    dstore<vector3d<real_t> > fnormal ;
+    dstore<vector3d<real_t> > ccenter ;
+    getCellCenter(facts, fcenter, fnormal, ccenter) ;
+
+    entitySet cells = cellStencil.domain() ;
+    multiMap upper,lower,boundary_map ;
+    upper = facts.get_variable("upper") ;
+    lower = facts.get_variable("lower") ;
+    boundary_map = facts.get_variable("boundary_map") ;
+
+    entitySet cellImage = Loci::MapRepP(cellStencil.Rep())->image(cells) ;
+    cellImage -= cells ;
+    if(facts.is_distributed_start()) {
+      std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
+      int tmp_out = cellImage.size() ;
+      if(GLOBAL_OR(tmp_out)) {
+	Loci::storeRepP sp = ccenter.Rep() ;
+	fill_clone(sp, cellImage, init_ptn) ;
+      }
+    }
+
+    store<int> sizes ;
+    sizes.allocate(cells) ;
+    vector<int> cellmap ;
+    FORALL(cells,cc) {
+      int csz = cellStencil[cc].size() ;
+      int bsz = boundary_map[cc].size() ; ;
+      vector3d<real_t>  ccent = ccenter[cc] ;
+      vector<vector3d<real_t> > cdirs(csz+bsz) ;
+      for(int i=0;i<csz;++i) {
+	cdirs[i] = ccenter[cellStencil[cc][i]]-ccent ;
+	cdirs[i] *= 1./norm(cdirs[i]) ;
+      }
+      for(int i=0;i<bsz;++i) {
+	cdirs[csz+i] = fcenter[boundary_map[cc][i]]-ccent ;
+	cdirs[csz+i] *= 1./norm(cdirs[csz+i]) ;
+      }
+	
+      vector<int> flags(csz+bsz,0) ;
+      int lsz = lower[cc].size() ;
+      for(int i=0;i<lsz;++i) {
+	vector3d<real_t>  dir = fcenter[lower[cc][i]] -ccent;
+	dir *= 1./norm(dir) ;
+	int minid = 0 ;
+	int maxid = 0 ;
+	real_t minval = dot(dir,cdirs[0]) ;
+	real_t maxval = minval ;
+	for(int j=1;j<csz+bsz;++j) {
+	  real_t v = dot(dir,cdirs[j]) ;
+	  if(minval < v) {
+	    minid = j ;
+	    minval = v ;
+	  }
+	  if(maxval > v) {
+	    maxid = j ;
+	    maxval = v ;
+	  }
+	}
+	flags[minid] = 1 ;
+	flags[maxid] = 1 ;
+	minid = 0 ;
+	maxid = 0 ;
+	dir = fnormal[lower[cc][i]] ;
+	minval = dot(dir,cdirs[0]) ;
+	maxval = minval ;
+	for(int j=1;j<csz+bsz;++j) {
+	  real_t v = dot(dir,cdirs[j]) ;
+	  if(minval < v) {
+	    minid = j ;
+	    minval = v ;
+	  }
+	  if(maxval > v) {
+	    maxid = j ;
+	    maxval = v ;
+	  }
+	}
+	flags[minid] = 1 ;
+	flags[maxid] = 1 ;
+      }
+      int usz = upper[cc].size() ;
+      for(int i=0;i<usz;++i) {
+	vector3d<real_t>  dir = fcenter[upper[cc][i]] -ccent;
+	dir *= 1./norm(dir) ;
+	int minid = 0 ;
+	int maxid = 0 ;
+	real_t minval = dot(dir,cdirs[0]) ;
+	real_t maxval = minval ;
+	for(int j=1;j<csz+bsz;++j) {
+	  real_t v = dot(dir,cdirs[j]) ;
+	  if(minval < v) {
+	    minid = j ;
+	    minval = v ;
+	  }
+	  if(maxval > v) {
+	    maxid = j ;
+	    maxval = v ;
+	  }
+	}
+	flags[minid] = 1 ;
+	flags[maxid] = 1 ;
+	minid = 0 ;
+	maxid = 0 ;
+	dir = fnormal[upper[cc][i]] ;
+	minval = dot(dir,cdirs[0]) ;
+	maxval = minval ;
+	for(int j=1;j<csz+bsz;++j) {
+	  real_t v = dot(dir,cdirs[j]) ;
+	  if(minval < v) {
+	    minid = j ;
+	    minval = v ;
+	  }
+	  if(maxval > v) {
+	    maxid = j ;
+	    maxval = v ;
+	  }
+	}
+	flags[minid] = 1 ;
+	flags[maxid] = 1 ;
+      }
+
+      for(int i=0;i<bsz;++i) {
+	vector3d<real_t>  dir = fcenter[boundary_map[cc][i]] -ccent;
+	dir *= 1./norm(dir) ;
+	int minid = 0 ;
+	int maxid = 0 ;
+	real_t minval = dot(dir,cdirs[0]) ;
+	real_t maxval = minval ;
+	for(int j=1;j<csz+bsz;++j) {
+	  real_t v = dot(dir,cdirs[j]) ;
+	  if(minval < v) {
+	    minid = j ;
+	    minval = v ;
+	  }
+	  if(maxval > v) {
+	    maxid = j ;
+	    maxval = v ;
+	  }
+	}
+	flags[minid] = 1 ;
+	flags[maxid] = 1 ;
+	minid = 0 ;
+	maxid = 0 ;
+	dir = fnormal[boundary_map[cc][i]] ;
+	minval = dot(dir,cdirs[0]) ;
+	maxval = minval ;
+	for(int j=1;j<csz+bsz;++j) {
+	  real_t v = dot(dir,cdirs[i]) ;
+	  if(minval < v) {
+	    minid = j ;
+	    minval = v ;
+	  }
+	  if(maxval > v) {
+	    maxid = j ;
+	    maxval = v ;
+	  }
+	}
+	flags[minid] = 1 ;
+	flags[maxid] = 1 ;
+      }
+
+      int cnt = 0 ;
+      for(int i=0;i<csz;++i)
+	if(flags[i] > 0) {
+	  cellmap.push_back(cellStencil[cc][i]) ;
+	  cnt++ ;
+	}
+      sizes[cc] = cnt ;
+    } ENDFORALL ;
+
+    multiMap cellStencilFiltered ;
+    cellStencilFiltered.allocate(sizes) ;
+    int cnt = 0 ;
+    FORALL(cells,cc) {
+      for(int i=0;i<cellStencilFiltered[cc].size();++i) {
+	cellStencilFiltered[cc][i] = cellmap[cnt] ;
+	cnt++ ;
+      }
+    } ENDFORALL ;
+    // Put in fact database
+    facts.create_fact("cellStencil",cellStencilFiltered) ;
+  }
+
+  
   void createLowerUpper(fact_db &facts) {
     constraint geom_cells,interior_faces,boundary_faces ;
     constraint faces = facts.get_variable("faces") ;
@@ -1904,18 +2386,35 @@ namespace Loci{
     global_geom_cells = all_collect_entitySet(*geom_cells,facts) ;
     multiMap lower,upper,boundary_map ;
     distributed_inverseMap(upper, cl, global_geom_cells, global_interior_faces,
-                           facts) ;
+                           facts,0) ; // FIX THIS
     distributed_inverseMap(lower, cr, global_geom_cells, global_interior_faces,
-                           facts) ;
+                           facts,0) ;
     distributed_inverseMap(boundary_map, cl, global_geom_cells,
-                           global_boundary_faces, facts) ;
-    
+                           global_boundary_faces, facts,0) ;
+
+    MapRepP clr = MapRepP(cl.Rep()) ;
+    MapRepP crr = MapRepP(cr.Rep()) ;
+    lower.Rep()->setDomainKeySpace(crr->getRangeKeySpace()) ;
+    upper.Rep()->setDomainKeySpace(clr->getRangeKeySpace()) ;
+    boundary_map.Rep()->setDomainKeySpace(clr->getRangeKeySpace()) ;
+    MapRepP(lower.Rep())->setRangeKeySpace(crr->getDomainKeySpace()) ;
+    MapRepP(upper.Rep())->setRangeKeySpace(clr->getDomainKeySpace()) ;
+    MapRepP(boundary_map.Rep())->setRangeKeySpace(clr->getDomainKeySpace()) ;
     facts.create_fact("lower",lower) ;
     facts.create_fact("upper",upper) ;
     facts.create_fact("boundary_map",boundary_map) ;
-  }
 
-  
+    param<std::string> gradStencil ;
+    storeRepP var = facts.get_variable("gradStencil") ;
+    if(var != 0) {
+      gradStencil = var ;
+      if(*gradStencil == "stable")
+	create_cell_stencil(facts) ;
+      if(*gradStencil == "full")
+	create_cell_stencil_full(facts) ;
+    }
+
+  }
 
   // this is a general routine that balances the pair vector
   // on each process, it redistributes the pair vector
@@ -2563,17 +3062,24 @@ namespace Loci{
     
     // Allocate entities for new edges
     int num_edges = emap.size() ;
-    entitySet edges = facts.get_distributed_alloc(num_edges).first ;
+    int ek = facts.getKeyDomain("Edges") ;
+    if(!useDomainKeySpaces)
+      ek = 0 ;
+    int fk = face2node.Rep()->getDomainKeySpace() ;
+    
+    entitySet edges = facts.get_distributed_alloc(num_edges,ek).first ;// FIX THIS
  
 
 
     //create constraint edges
     constraint edges_tag;
     *edges_tag = edges;
+    edges_tag.Rep()->setDomainKeySpace(ek) ;
     facts.create_fact("edges", edges_tag);
     
     // Copy edge nodes into a MapVec
     MapVec<2> edge ;
+    edge.Rep()->setDomainKeySpace(ek) ;
     edge.allocate(edges) ;
     vector<pair<Entity,Entity> >::iterator pi = emap.begin() ;
     for(entitySet::const_iterator ei=edges.begin();
@@ -2737,6 +3243,8 @@ namespace Loci{
       
     }
     // Add face2edge to the fact database
+    face2edge.Rep()->setDomainKeySpace(fk) ;
+    MapRepP(face2edge.Rep())->setRangeKeySpace(ek) ;
     facts.create_fact("face2edge",face2edge) ;
 
 
@@ -2751,12 +3259,12 @@ namespace Loci{
       }ENDFORALL;
     
       
-      std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
+      std::vector<entitySet> init_ptn = facts.get_init_ptn(0) ;// FIX THIS
       fact_db::distribute_infoP df = facts.get_distribute_info() ;
       storeRepP pos = facts.get_variable("pos");
       
       dMap g2f ;
-      g2f = df->g2f.Rep() ;
+      g2f = df->g2fv[0].Rep() ; // FIX THIS
       //don't use nodes & init_ptn to define local nodes,
       //because nodes may not cover all nodes in init_ptn
       entitySet localNodes = pos->domain()&init_ptn[MPI_rank] ;
@@ -2905,11 +3413,13 @@ namespace Loci{
       //the input_image is not really the image, it should be the global2file's domain
       //if it doesn't include all corresponding entities in init_ptn, error will occur
       //also input_preimage is never used
+      std::vector<entitySet> init_ptne = facts.get_init_ptn(ek) ;// FIX THIS
+
       Loci::distributed_inverseMap(global2file,
                                    file2global,
                                    input_image,
                                    input_preimage,
-                                   init_ptn);
+                                   init_ptne);
     
     
       if(global2file.domain() != edges){
@@ -2919,9 +3429,9 @@ namespace Loci{
       }
     
       fact_db::distribute_infoP dist = facts.get_distribute_info() ;
-    
+
       FORALL(global2file.domain(), ei){
-        dist->g2f[ei] = global2file[ei][0] ;
+        dist->g2fv[0][ei] = global2file[ei][0] ;
       }ENDFORALL;
     
     }
@@ -2935,6 +3445,7 @@ namespace Loci{
     }ENDFORALL;
     
     // Add edge3node data structure to fact databse
+    edge3.Rep()->setDomainKeySpace(ek) ;
     facts.create_fact("edge2node",edge3) ;  
     
   } // end of createEdgesPar

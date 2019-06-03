@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -59,13 +59,16 @@ using std::map ;
 // doesn't work with large interval sets.  This needs to be fixed... however
 // we are reworking how the fact_db will be created so this can wait until that
 // process is further along.
+
+// RSM MOD 20181108
+#ifdef LOCI_USE_METIS
 #include <parmetis.h>
 #if REALTYPEWIDTH == 32
 typedef float metisreal_t ;
 #else
 typedef double metisreal_t ;
 #endif
-
+#endif
 namespace Loci {
 
   extern void memSpace(string s) ;
@@ -194,6 +197,8 @@ namespace Loci {
 
   }
 
+  // RSM MOD 20181108
+#ifdef LOCI_USE_METIS
   vector<entitySet> newMetisPartitionOfCells(const vector<entitySet> &local_cells,
                                              const Map &cl, const Map &cr) {
 
@@ -421,6 +426,8 @@ namespace Loci {
 
   }
 
+#endif /* #ifdef LOCI_USE_METIS */
+
   vector<entitySet> partitionFaces(vector<entitySet> cell_ptn, const Map &cl,
                                    const Map &cr) {
     map<int,int> P ;
@@ -579,9 +586,9 @@ namespace Loci {
     face2node.setRep(face2nodet.Rep()) ;
 
     // update remap from global to file numbering for faces after sorting
-    fact_db::distribute_infoP df = facts.get_distribute_info() ;
+    fact_db::distribute_infoP df = facts.get_distribute_info() ; 
     dMap g2f ;
-    g2f = df->g2f.Rep() ;
+    g2f = df->g2fv[0].Rep() ;
     vector<pair<int, int> > remap_update(faces.size()) ;
     int cnt=0 ;
     FORALL(faces,fc) {
@@ -589,7 +596,7 @@ namespace Loci {
       remap_update[cnt].first = g2f[convert[fc]] ;
       cnt++ ;
     } ENDFORALL ;
-    facts.update_remap(remap_update) ;
+    facts.update_remap(remap_update,0) ;// FIX THIS
     
     using std::cout ;
     using std::endl ;
@@ -700,7 +707,7 @@ namespace Loci{
    
     // Now get global to file numbering
     dMap g2f ;
-    g2f = dist->g2f.Rep() ;
+    g2f = dist->g2fv[0].Rep() ; // FIX THIS
 
     // Compute map from local numbering to file numbering
     Map newnum ;
@@ -879,9 +886,9 @@ namespace Loci{
       int nfaces = local_faces[0].size();
       int ncells = local_cells[0].size();
 
-      entitySet nodes = facts.get_distributed_alloc(npnts).first ;
-      entitySet faces = facts.get_distributed_alloc(nfaces).first ;
-      entitySet cells = facts.get_distributed_alloc(ncells).first;
+      entitySet nodes = facts.get_distributed_alloc(npnts,0).first ; // FIX THIS
+      entitySet faces = facts.get_distributed_alloc(nfaces,0).first ;
+      entitySet cells = facts.get_distributed_alloc(ncells,0).first;
 
       store<vector3d<double> > pos ;
       Map cl ;
@@ -953,7 +960,13 @@ namespace Loci{
     } else {
       // Partition Cells
       if(!use_simple_partition) {
+#ifdef LOCI_USE_METIS
         cell_ptn = newMetisPartitionOfCells(local_cells,tmp_cl,tmp_cr) ;
+#else
+	if(MPI_rank==0){
+	  debugout << "METIS is DISABLED.  SFC based simple_partition is default use. Please recompile" << endl;
+	}
+#endif
       } else {
         cell_ptn = vector<entitySet>(MPI_processes) ;
         cell_ptn[MPI_rank] = local_cells[MPI_rank] ;
@@ -984,7 +997,7 @@ namespace Loci{
         node_alloc[i++] = ni ;
       } ENDFORALL;
 
-    entitySet nodes = facts.get_distributed_alloc(node_alloc).first ;
+    entitySet nodes = facts.get_distributed_alloc(node_alloc,0).first ; // FIX THIS
     node_alloc.resize(0) ;
 
     int newfaces = 0 ;
@@ -998,7 +1011,7 @@ namespace Loci{
         face_alloc[i++] = ni ;
       }ENDFORALL;
 
-    entitySet faces = facts.get_distributed_alloc(face_alloc).first ;
+    entitySet faces = facts.get_distributed_alloc(face_alloc,0).first ;
     face_alloc.resize(0) ;
 
     int newcells = 0 ;
@@ -1012,7 +1025,7 @@ namespace Loci{
         cell_alloc[i++] = ni ;
       }ENDFORALL;
 
-    entitySet cells = facts.get_distributed_alloc(cell_alloc).first ;
+    entitySet cells = facts.get_distributed_alloc(cell_alloc,0).first ; // FIX THIS
 
     debugout << "nodes = " << nodes << ", size= "
              << nodes.size() << endl;
@@ -1029,7 +1042,7 @@ namespace Loci{
     
    
     Loci::memSpace("before update_remap") ;
-    facts.update_remap(boundary_update);
+    facts.update_remap(boundary_update,0); // FIX THIS
     Loci::memSpace("after update_remap") ;
     
    
@@ -1091,7 +1104,7 @@ namespace Loci{
     // update remap from global to file numbering for faces after sorting
     fact_db::distribute_infoP df = facts.get_distribute_info() ;
     dMap g2f ;
-    g2f = df->g2f.Rep() ;
+    g2f = df->g2fv[0].Rep() ; // FIX THIS
 
     int cells_base = local_cells[0].Min() ;
     for(size_t i=0;i<volTags.size();++i) {
@@ -1159,7 +1172,7 @@ namespace Loci{
     if((ndom%MPI_processes) > Loci::MPI_rank)
       nloc++ ;
 
-    pair<entitySet,entitySet> alloc = facts.get_distributed_alloc(nloc) ;
+    pair<entitySet,entitySet> alloc = facts.get_distributed_alloc(nloc,0) ; // FIX THIS
     store<string> bn2 ;
     bn2.allocate(alloc.second) ;
     store<string> bt2 ;
@@ -1211,11 +1224,11 @@ namespace Loci{
       *geom_cells += cl[fc] ;
     } ENDFORALL ;
 
-    std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
+    std::vector<entitySet> init_ptn = facts.get_init_ptn(0) ; // FIX THIS
     entitySet global_geom = all_collect_entitySet(*geom_cells,facts) ;
     *geom_cells = global_geom & init_ptn[ MPI_rank] ;
     *boundary_faces &= init_ptn[ MPI_rank] ;
-    std::pair<entitySet, entitySet> ghost_pair = facts.get_distributed_alloc((*boundary_faces).size()) ;
+    std::pair<entitySet, entitySet> ghost_pair = facts.get_distributed_alloc((*boundary_faces).size(),0) ; // FIX THIS
     entitySet tmp_ghost = ghost_pair.first ;
     entitySet::const_iterator ei = tmp_ghost.begin() ;
     FORALL(*boundary_faces,fc) {

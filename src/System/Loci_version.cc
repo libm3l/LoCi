@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -22,7 +22,7 @@
 
 namespace Loci {
   
-  const char *revision_name = "$Name: rel-4-0-beta-10 $" ;
+  const char *revision_name = "$Name: rel-4-0 $" ;
 
   std::string version() {
     const char *p = revision_name;

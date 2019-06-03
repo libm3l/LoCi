@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -167,6 +167,11 @@ char orient_edgeID_f2c(char edgeID, char orientCode){
     return char((3-edgeID+orientCode)%4);
   }
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wchar-subscripts"
+#endif
 
 //used in building cells, quadface is built as defined in cell, and split with orientCode
 //all new nodes and edges are put into node_list and edge_list
@@ -1347,3 +1352,6 @@ void tag_quad_face( const Entity* face2node,
   cleanup_list(tmp_node_list2);
   cleanup_list(tmp_bnode_list);
 }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif

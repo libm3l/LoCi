@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -61,6 +61,9 @@ using std::istringstream ;
 #include <stdio.h>
 #include <strings.h>
 
+// RSM MOD 20181108
+// WRAP METIS in LOCI_USE_METIS
+#ifdef LOCI_USE_METIS
 #include <parmetis.h>
 
 #if REALTYPEWIDTH == 32
@@ -69,7 +72,12 @@ typedef float metisreal_t ;
 typedef double metisreal_t ;
 #endif
 
+
+#endif
+
+
 namespace Loci {
+  extern  bool useDomainKeySpaces  ;
   //#define MEMDIAG
   
 #ifdef MEMDIAG
@@ -88,6 +96,8 @@ namespace Loci {
                            vector<int> &procid,
                            MPI_Comm comm) ;
 
+  bool redistribute_cell_weight(storeRepP old_store, storeRepP new_store);
+  extern vector<entitySet> simplePartition(int mn, int mx, MPI_Comm comm);
   void memSpace(string s) {
 #ifdef MEMDIAG
 
@@ -111,6 +121,7 @@ namespace Loci {
   extern bool use_orb_partition ;
   extern bool load_cell_weights ;
   extern string cell_weight_file ;
+  extern storeRepP cell_weight_store ; 
   //Following assumption is needed for the next three functions
   //Assumption: We follow the convention that boundary cells are always on right side
   //of a face.
@@ -328,7 +339,7 @@ namespace Loci {
   }
 
   bool readBCfromVOG(string filename,
-                 vector<pair<int,string> > &boundary_ids) {
+                     vector<pair<int,string> > &boundary_ids) {
     hid_t file_id = 0 ;
     int failure = 0 ; // No failure
     /* Save old error handler */
@@ -887,6 +898,9 @@ namespace Loci {
 
     int face_accum = 0 ;
     int faces_base = max_alloc + nnodes ;
+    if(Loci::MPI_processes > 1) {
+      faces_base = max_alloc ;
+    }
     for(int i = 0; i < MPI_processes; ++i) {
       local_faces[i] = EMPTY ;
       if(faces_pp[i] > 0)
@@ -895,6 +909,8 @@ namespace Loci {
       face_accum += faces_pp[i] ;
     }
     int cells_base = faces_base + face_accum ;
+    if(Loci::MPI_processes > 1)
+      cells_base = max_alloc+nnodes ;
 
 
     store<int> counts ;
@@ -914,7 +930,6 @@ namespace Loci {
                                 face2node,cl,cr,face_base) ;
       face_base += nfaces ;
     }
-
 
     for(size_t i=0;i<volTags.size();++i)
       volTags[i].second = (volTags[i].second >> cells_base) ;
@@ -998,7 +1013,7 @@ namespace Loci {
 	boundary_names[mi->second] = boundary_ids[i].second ;
       else 
 	debugout << "id " << id << " for boundary surface " << boundary_ids[i].second
-	     << " not found!" << endl ;
+                 << " not found!" << endl ;
     }
 
       
@@ -1020,11 +1035,11 @@ namespace Loci {
                                      entitySet input_preimage,
                                      const std::vector<entitySet> &init_ptn) ;
 
+
+#ifdef LOCI_USE_METIS
   vector<entitySet> newMetisPartitionOfCells(const vector<entitySet> &local_cells,
                                              const Map &cl, const Map &cr,
 					     const store<string> &boundary_tags) {
-
-
     entitySet dom = cl.domain() & cr.domain() ;
     entitySet refset = boundary_tags.domain() ;
     entitySet bcfaces = cr.preimage(refset).first ;
@@ -1124,6 +1139,9 @@ namespace Loci {
 
     // read in additional vertex weights if any
     if(load_cell_weights) {
+
+      store<int> cell_weights ;
+
       // check if the file exists
       int file_exists = 1 ;
       if(Loci::MPI_rank == 0) {
@@ -1135,6 +1153,7 @@ namespace Loci {
       MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
       
       if(file_exists == 1) {
+        
         if(Loci::MPI_rank == 0) {
           std::cout << "ParMETIS reading additional cell weights from: "
                     << cell_weight_file << std::endl ;
@@ -1150,18 +1169,24 @@ namespace Loci {
         
         // read
         entitySet dom = local_cells[Loci::MPI_rank] ;
-        store<int> cell_weights ;
-
-        readContainerRAW(file_id,"cell weight", cell_weights.Rep(),
+        
+        readContainerRAW(file_id,"cellweights", cell_weights.Rep(),
                          MPI_COMM_WORLD) ;
 
+        Loci::hdf5CloseFile(file_id) ;
+      }else if(cell_weight_store !=0){
+        
+        entitySet dom = local_cells[Loci::MPI_rank] ;
+        cell_weights.allocate(dom);
+        redistribute_cell_weight(cell_weight_store,cell_weights.Rep()); 
+      }
+
+      if(file_exists || cell_weight_store != 0){
         if(cell_weights.domain() != local_cells[Loci::MPI_rank]) {
           cerr << "cell weights partition inconsistent!" << endl ;
           Loci::Abort() ;
         }
-        
-        Loci::hdf5CloseFile(file_id) ;
-
+              
         // compute necessary ParMETIS data-structure
         wgtflag = 2 ;           // weights on the vertices only
         idx_t ncon = 2 ;          // number of weights per vertex
@@ -1193,26 +1218,32 @@ namespace Loci {
                              &tpwgts[0],&ubvec[0],&options,&edgecut,&part[0],
                              &mc) ;
 
-          
-      } else {
-        // if weight file does not exist, then we would
-        // fall back to the non weighted partition
-        if(Loci::MPI_rank == 0) {
-          std::cout << "ParMETIS cell weight file not found, "
-                    << "using non-weighted partition..." << std::endl ;
-        }
-        idx_t ncon = 1 ;
+      }else{//same as not load_cell_weight
+            //      idx_t ncon = 1 ;
+        idx_t ncon = 2 ;
         idx_t tpwgts_len = ncon*nparts ;
         vector<metisreal_t> tpwgts(tpwgts_len) ;
         for(idx_t i=0;i<tpwgts_len;++i)
           tpwgts[i] = 1.0 / double(nparts) ;
-        
-        
-        metisreal_t ubvec = 1.05 ;
-        wgtflag = 0 ;
-        ParMETIS_V3_PartKway(&vdist[0],&xadj[0],&adjncy[0],NULL,NULL,
+
+        vector<metisreal_t> ubvec(ncon) ;
+        for(idx_t i=0;i<ncon;++i)
+          ubvec[i] = 1.05 ;     // as recommended by the ParMETIS manual
+        wgtflag = 2 ;
+        // now construct the vertex weights
+        vector<idx_t> vwgt(ncon*size_map) ;
+
+        int cnt = 0 ;
+        for(int i=0;i<size_map;++i) {
+          // first weight for cell is 1 (the cell computation)
+          vwgt[cnt] = 1 ;
+          // the second weight is from the store cell_weights[*ei]
+          vwgt[cnt+1] =  size_adj[i] ;
+          cnt += ncon ;
+        }
+        ParMETIS_V3_PartKway(&vdist[0],&xadj[0],&adjncy[0],&vwgt[0],NULL,
                              &wgtflag,&numflag,&ncon,&nparts,
-                             &tpwgts[0],&ubvec,&options,&edgecut,
+                             &tpwgts[0],&ubvec[0],&options,&edgecut,
                              &part[0],&mc) ;
       }
       
@@ -1257,10 +1288,11 @@ namespace Loci {
     for(int i=0;i<size_map;++i) {
       ptn[part[i]] += i + cmin ;
     }
+   
     return ptn;
 
   }
-
+#endif /* LOCI_USE_METIS */
 
   void redistribute_container(const vector<entitySet> &ptn,
                               const vector<entitySet> &ptn_t,
@@ -1347,9 +1379,13 @@ namespace Loci {
 		 entitySet bcsurfset,
                  fact_db &facts) {
 
+    int faceKeySpace = tmp_face2node.Rep()->getDomainKeySpace() ;
     pos.allocate(nodes) ;
     cl.allocate(faces) ;
     cr.allocate(faces) ;
+    cl.Rep()->setDomainKeySpace(faceKeySpace) ;
+    cr.Rep()->setDomainKeySpace(faceKeySpace) ;
+
     entitySet old_nodes = t_pos.domain() ;
     redistribute_container(node_ptn,node_ptn_t,nodes,t_pos.Rep(),pos.Rep()) ;
     t_pos.allocate(EMPTY) ;
@@ -1357,6 +1393,9 @@ namespace Loci {
     tmp_cr.allocate(EMPTY) ;
     redistribute_container(face_ptn,face_ptn_t,faces,tmp_cl.Rep(),cl.Rep()) ;
     tmp_cl.allocate(EMPTY) ;
+
+    cl.Rep()->setDomainKeySpace(faceKeySpace) ;
+    cr.Rep()->setDomainKeySpace(faceKeySpace) ;
 
     using std::pair ;
     vector<pair<Entity,Entity> > sortlist(faces.size()) ;
@@ -1371,6 +1410,7 @@ namespace Loci {
     redistribute_container(face_ptn,face_ptn_t,faces,count.Rep(),count_reorder.Rep()) ;
 
     face2node.allocate(count_reorder) ;
+    face2node.Rep()->setDomainKeySpace(tmp_face2node.Rep()->getDomainKeySpace()) ;
     redistribute_container(face_ptn,face_ptn_t,faces,tmp_face2node.Rep(),
                            face2node.Rep()) ;
     tmp_face2node.allocate(EMPTY) ;
@@ -1391,6 +1431,8 @@ namespace Loci {
                            face2node.begin(convert[fc])) ;
     } ENDFORALL ;
     Map clt,crt ;
+    clt.Rep()->setDomainKeySpace(faceKeySpace) ;
+    crt.Rep()->setDomainKeySpace(faceKeySpace) ;
     clt.allocate(faces) ;
     crt.allocate(faces) ;
     FORALL(faces,fc) {
@@ -1401,6 +1443,7 @@ namespace Loci {
     cr.setRep(crt.Rep()) ;
     multiMap face2nodet ;
     face2nodet.allocate(count_reorder) ;
+    face2nodet.Rep()->setDomainKeySpace(faceKeySpace) ;
     FORALL(faces,fc) {
       int sz = count_reorder[fc] ;
       for(int j=0;j<sz;++j)
@@ -1408,18 +1451,20 @@ namespace Loci {
     } ENDFORALL ;
     face2node.setRep(face2nodet.Rep()) ;
 
-    // update remap from global to file numbering for faces after sorting
-    fact_db::distribute_infoP df = facts.get_distribute_info() ;
-    dMap g2f ;
-    g2f = df->g2f.Rep() ;
-    vector<pair<int, int> > remap_update(faces.size()) ;
-    int cnt=0 ;
-    FORALL(faces,fc) {
-      remap_update[cnt].second = fc ;
-      remap_update[cnt].first = g2f[convert[fc]] ;
-      cnt++ ;
-    } ENDFORALL ;
-    facts.update_remap(remap_update) ;
+    {
+      // update remap from global to file numbering for faces after sorting
+      fact_db::distribute_infoP df = facts.get_distribute_info() ;
+      dMap g2f ;
+      g2f = df->g2fv[face2node.Rep()->getDomainKeySpace()].Rep() ; 
+      vector<pair<int, int> > remap_update(faces.size()) ;
+      int cnt=0 ;
+      FORALL(faces,fc) {
+	remap_update[cnt].second = fc ;
+	remap_update[cnt].first = g2f[convert[fc]] ;
+	cnt++ ;
+      } ENDFORALL ;
+      facts.update_remap(remap_update,face2node.Rep()->getDomainKeySpace()) ;
+    }
     
     using std::cout ;
     using std::endl ;
@@ -1564,8 +1609,8 @@ namespace Loci {
     } ENDFORALL ;
 
     pos = t_pos.Rep()->remap(identity_map);
-    cl = tmp_cl.Rep()->remap(identity_map);
-    cr = tmp_cr.Rep()->remap(identity_map);
+    cl = MapRepP(tmp_cl.getRep())->MapRemap(identity_map,identity_map);
+    cr = MapRepP(tmp_cr.getRep())->MapRemap(identity_map,identity_map);
     face2node = MapRepP(tmp_face2node.Rep())->get_map();
     boundary_names = tmp_boundary_names.Rep()->remap(identity_map) ;
     boundary_tags = tmp_boundary_tags.Rep()->remap(identity_map) ;
@@ -2037,7 +2082,7 @@ namespace Loci {
     store<string> tmp_boundary_names ;
     store<string> tmp_boundary_tags ;
 
-    int max_alloc = facts.get_max_alloc() ;
+    int max_alloc = facts.get_max_alloc(0) ; // FIX THIS
 
     bool useVOG = true ;
 
@@ -2076,10 +2121,10 @@ namespace Loci {
       int nfaces = local_faces[0].size();
       int ncells = local_cells[0].size();
       int nbcs = global_boundary_cells.size() ;
-      entitySet nodes = facts.get_distributed_alloc(npnts).first ;
-      entitySet faces = facts.get_distributed_alloc(nfaces).first ;
-      entitySet cells = facts.get_distributed_alloc(ncells).first;
-      entitySet bcset = facts.get_distributed_alloc(nbcs).first ;
+      entitySet nodes = facts.get_distributed_alloc(npnts,0).first ; // FIX THIS
+      entitySet faces = facts.get_distributed_alloc(nfaces,0).first ;
+      entitySet cells = facts.get_distributed_alloc(ncells,0).first;
+      entitySet bcset = facts.get_distributed_alloc(nbcs,0).first ;
 
 
       store<vector3d<double> > pos ;
@@ -2098,6 +2143,7 @@ namespace Loci {
       facts.create_fact("cl", cl) ;
       facts.create_fact("cr", cr) ;
       facts.create_fact("pos", pos) ;
+
       facts.create_fact("face2node",face2node) ;
       facts.create_fact("boundary_names", boundary_names) ;
       facts.create_fact("boundary_tags", boundary_tags) ;
@@ -2136,8 +2182,15 @@ namespace Loci {
 	useMetis = false ;
       }
       if(useMetis) {
-        cell_ptn = newMetisPartitionOfCells(local_cells,tmp_cl,tmp_cr,
-					    tmp_boundary_tags) ;
+
+#ifdef LOCI_USE_METIS
+        cell_ptn = newMetisPartitionOfCells(local_cells,tmp_cl,tmp_cr,tmp_boundary_tags) ;
+#else
+	if(MPI_rank==0) {
+          debugout << "METIS disabled:: Use Simple Partition - Based on Space Filling Curve! "<< endl ;
+          useMetis = false ;
+        }
+#endif
       } else {
         cell_ptn = vector<entitySet>(MPI_processes) ;
         cell_ptn[MPI_rank] = local_cells[MPI_rank] ;
@@ -2152,7 +2205,8 @@ namespace Loci {
 	      file_exists = 0 ;
 	  }
 	  MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
-	  
+          store<int> cell_weights ;
+          
 	  if(file_exists == 1) {
 	    if(Loci::MPI_rank == 0) {
 	      std::cout << "simple partition reading additional cell weights from: "
@@ -2166,19 +2220,27 @@ namespace Loci {
 	      std::cerr << "...file reading failed..., Aborting" << std::endl ;
 	      Loci::Abort() ;
 	    }
-        
+            
 	    // read
-	    store<int> cell_weights ;
+	   
 	    
 	    readContainerRAW(file_id,"cell weight", cell_weights.Rep(),
 			     MPI_COMM_WORLD) ;
-	    
+            Loci::hdf5CloseFile(file_id) ;
+          }else if(cell_weight_store != 0){
+            entitySet dom = local_cells[MPI_rank];
+            cell_weights.allocate(dom);
+            redistribute_cell_weight(cell_weight_store, cell_weights.Rep());
+          }
+          
+          if(file_exists == 1 || cell_weight_store != 0){ 
+            
 	    if(cell_weights.domain() != local_cells[Loci::MPI_rank]) {
 	      cerr << "cell weights partition inconsistent!" << endl ;
 	      Loci::Abort() ;
 	    }
         
-	    Loci::hdf5CloseFile(file_id) ;
+	   
 	    int tot_weight = 0 ;
 
 	    cell_ptn[MPI_rank] = EMPTY ;
@@ -2256,7 +2318,7 @@ namespace Loci {
         node_alloc[i++] = ni ;
       } ENDFORALL;
 
-    entitySet nodes = facts.get_distributed_alloc(node_alloc).first ;
+    entitySet nodes = facts.get_distributed_alloc(node_alloc,0).first ;// FIX THIS
     node_alloc.resize(0) ;
 
     int newfaces = 0 ;
@@ -2270,7 +2332,12 @@ namespace Loci {
         face_alloc[i++] = ni ;
       }ENDFORALL;
 
-    entitySet faces = facts.get_distributed_alloc(face_alloc).first ;
+    int fk = facts.getKeyDomain("Faces") ;
+
+    if(!useDomainKeySpaces)
+      fk = 0 ;
+
+    entitySet faces = facts.get_distributed_alloc(face_alloc,fk).first ;
     face_alloc.resize(0) ;
 
     int newcells = 0 ;
@@ -2284,7 +2351,7 @@ namespace Loci {
         cell_alloc[i++] = ni ;
       }ENDFORALL;
 
-    entitySet cells = facts.get_distributed_alloc(cell_alloc).first ;
+    entitySet cells = facts.get_distributed_alloc(cell_alloc,0).first ;//Fix This
 
     Loci::debugout << "nodes = " << nodes << ", size= "
                    << nodes.size() << endl;
@@ -2299,11 +2366,15 @@ namespace Loci {
       bcsurf_alloc[i++] = ii ;
     } ENDFORALL ;
     
-    entitySet bcsurfset = facts.get_distributed_alloc(bcsurf_alloc).first ;
+    entitySet bcsurfset = facts.get_distributed_alloc(bcsurf_alloc,0).first ;// FIX THIS
     
     memSpace("before remapGridStructures") ;
     Map cl, cr ;
     multiMap face2node ;
+    tmp_cl.Rep()->setDomainKeySpace(fk) ;
+    tmp_cr.Rep()->setDomainKeySpace(fk) ;
+    tmp_face2node.Rep()->setDomainKeySpace(fk) ;
+
     store<vector3d<double> > pos ;
     store<string> boundary_names,boundary_tags ;
     remapGrid(node_ptn, face_ptn, cell_ptn,
@@ -2318,6 +2389,7 @@ namespace Loci {
     facts.create_fact("cl", cl) ;
     facts.create_fact("cr", cr) ;
     facts.create_fact("pos", pos) ;
+
     facts.create_fact("face2node",face2node) ;
     facts.create_fact("boundary_names", boundary_names) ;
     facts.create_fact("boundary_tags", boundary_tags) ;
@@ -2325,7 +2397,7 @@ namespace Loci {
     // update remap from global to file numbering for faces after sorting
     fact_db::distribute_infoP df = facts.get_distribute_info() ;
     dMap g2f ;
-    g2f = df->g2f.Rep() ;
+    g2f = df->g2fv[0].Rep() ; // FIX THIS
 
     for(size_t i=0;i<volTags.size();++i) {
       param<string> Tag ;
@@ -2351,8 +2423,6 @@ namespace Loci {
     return true ;
   }
 
-  enum matrix_coloring_type {COLOR_DEFAULT, COLOR_DFS} ;
-
   void create_ref(fact_db &facts) {
     store<string> boundary_names ;
     store<string> boundary_tags ;
@@ -2371,6 +2441,7 @@ namespace Loci {
     FORALL(refdom,i1) {
       ref[i1] = cr[i1] ;
     } ENDFORALL ;
+    ref.Rep()->setDomainKeySpace(cr.Rep()->getDomainKeySpace()) ;
     facts.create_fact("ref",ref) ;
   }
 
@@ -2396,11 +2467,17 @@ namespace Loci {
       *geom_cells += cl[fc] ;
     } ENDFORALL ;
 
-    std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
+    std::vector<entitySet> init_ptn = facts.get_init_ptn(0) ;//FIX THIS
     entitySet global_geom = all_collect_entitySet(*geom_cells,facts) ;
     *geom_cells = global_geom & init_ptn[ MPI_rank] ;
-    *boundary_faces &= init_ptn[ MPI_rank] ;
-    std::pair<entitySet, entitySet> ghost_pair = facts.get_distributed_alloc((*boundary_faces).size()) ;
+
+
+    int fk = boundary_faces.Rep()->getDomainKeySpace()  ;
+    std::vector<entitySet> initf_ptn = facts.get_init_ptn(fk) ;
+     
+    *boundary_faces &= initf_ptn[ MPI_rank] ;
+
+    std::pair<entitySet, entitySet> ghost_pair = facts.get_distributed_alloc((*boundary_faces).size(),0) ; // FIX THIS
     entitySet tmp_ghost = ghost_pair.first ;
     entitySet::const_iterator ei = tmp_ghost.begin() ;
     FORALL(*boundary_faces,fc) {
@@ -2429,258 +2506,25 @@ namespace Loci {
     faces = (cl.domain() & cr.domain()) ;
     
     //    faces = all_collect_entitySet(*faces) ;
-
+    int fk = cl.Rep()->getDomainKeySpace() ;
+    faces.Rep()->setDomainKeySpace(fk) ;
     facts.create_fact("faces",faces) ;
     store<string> boundary_names ;
     boundary_names = facts.get_variable("boundary_names") ;
     entitySet bcset = boundary_names.domain() ;
+
     entitySet bcfaces = cr.preimage(bcset).first ;
     constraint boundary_faces ;
+
     boundary_faces = bcfaces ;
     //    boundary_faces = all_collect_entitySet(bcfaces) ;
     constraint interior_faces ;
     interior_faces = (*faces-*boundary_faces) ;
+    boundary_faces.Rep()->setDomainKeySpace(fk) ;
+    interior_faces.Rep()->setDomainKeySpace(fk) ;
     facts.create_fact("boundary_faces",boundary_faces) ;
     facts.create_fact("interior_faces",interior_faces) ;
   }
-
-  void color_matrix(fact_db &facts, matrix_coloring_type mct) {
-    std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
-    multiMap c2c ;
-    store<int> sizes ;
-    constraint geom_cells ;
-    geom_cells = facts.get_variable("geom_cells") ;
-    sizes.allocate(*geom_cells) ;
-    Map cl,cr ;
-    cl = facts.get_variable("cl") ;
-    cr = facts.get_variable("cr") ;
-    constraint faces ;
-    constraint interior_faces ;
-    faces = facts.get_variable("faces") ;
-    interior_faces = facts.get_variable("interior_faces") ;
-
-    FORALL(*geom_cells, cc) {
-      sizes[cc] = 0 ;
-    } ENDFORALL ;
-    FORALL(*interior_faces,fc) {
-      if((init_ptn[Loci::MPI_rank].inSet(cl[fc]))&& (init_ptn[Loci::MPI_rank].inSet(cr[fc])))
-	sizes[cl[fc]]++ ;
-      if((init_ptn[Loci::MPI_rank].inSet(cr[fc])) && (init_ptn[Loci::MPI_rank].inSet(cl[fc])))
-	sizes[cr[fc]]++ ;
-    } ENDFORALL ;
-    c2c.allocate(sizes) ;
-    FORALL(*interior_faces,fc) {
-      //FATAL(sizes[cl[fc]] < 1) ;
-      //FATAL(sizes[cr[fc]] < 1) ;
-      if((init_ptn[Loci::MPI_rank].inSet(cl[fc]))  && (init_ptn[Loci::MPI_rank].inSet(cr[fc])))
-	c2c[cl[fc]][--sizes[cl[fc]]] = cr[fc] ;
-      if((init_ptn[Loci::MPI_rank].inSet(cr[fc])) && (init_ptn[Loci::MPI_rank].inSet(cl[fc])))
-	c2c[cr[fc]][--sizes[cr[fc]]] = cl[fc] ;
-    } ENDFORALL ;
-    dstore<int> color ;
-    entitySet out_of_dom ;
-
-    entitySet glob_geom = Loci::all_collect_entitySet(*geom_cells) ;
-    FORALL(*interior_faces,fc) {
-      if(!init_ptn[Loci::MPI_rank].inSet(cl[fc]))
-	out_of_dom += cl[fc] ;
-      if(!init_ptn[Loci::MPI_rank].inSet(cr[fc]))
-	out_of_dom += cr[fc] ;
-    } ENDFORALL ;
-
-    for(int i = 0; i < Loci::MPI_processes; ++i) {
-      init_ptn[i] &= glob_geom ;
-      entitySet tmp_set =  (init_ptn[i] & out_of_dom) ;
-      for(entitySet::const_iterator ei = tmp_set.begin(); ei != tmp_set.end(); ++ei)
-	color[*ei] = init_ptn[i].Min() ;
-    }
-    FORALL(*geom_cells,cc) {
-      color[cc] = -1 ;
-    } ENDFORALL ;
-    int col = (*geom_cells).Min() ;
-    vector<int> visited ;
-    entitySet left_out = *geom_cells ;
-    while(left_out != EMPTY) {
-      vector<int> work ;
-      work.push_back(left_out.Min()) ;
-      while(work.size() != 0) {
-	vector<int> working ;
-	for(size_t i=0;i<work.size();++i) {
-          int cc = work[i] ;
-	  if(color[cc] == -1) {
-	    color[cc] = col++ ;
-	    visited.push_back(cc) ;
-	    for(const int *pi = c2c.begin(cc);pi!=c2c.end(cc);++pi)
-	      working.push_back(*pi) ;
-	  }
-	}
-        work.swap(working) ;
-      }
-      entitySet visitSet = create_intervalSet(visited.begin(),visited.end()) ;
-      left_out -= visitSet ;
-    }
-
-    FORALL(*interior_faces,fc) {
-      if(color[cl[fc]] > color[cr[fc]])
-        std::swap(cl[fc],cr[fc]) ;
-    } ENDFORALL ;
-
-  }
-  void make_faces_consistent(fact_db &facts) {
-    store<vector3d<double> > pos ;
-    pos = facts.get_variable("pos") ;
-    store<vector3d<double> > fpos ;
-    store<vector3d<double> > area ;
-
-    multiMap face2node ;
-    face2node = facts.get_variable("face2node") ;
-    constraint faces ;
-    constraint interior_faces ;
-    faces = facts.get_variable("faces") ;
-    interior_faces = facts.get_variable("interior_faces") ;
-    entitySet total_dom = Loci::MapRepP(face2node.Rep())->image(*faces) + pos.domain() ;
-    std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
-    Loci::storeRepP pos_sp = pos.Rep() ;
-    dstore<vector3d<double> > tmp_pos ;
-    FORALL(pos.domain(), pi) {
-      tmp_pos[pi] = pos[pi] ;
-    } ENDFORALL ;
-    Loci::storeRepP sp = tmp_pos.Rep() ;
-    if(MPI_processes > 1)
-      fill_clone(sp, total_dom, init_ptn) ;
-    entitySet face_dom = face2node.domain() ;
-    fpos.allocate(face_dom) ;
-    area.allocate(face_dom) ;
-
-    FORALL(face_dom,fc) {
-      int nnodes = face2node.end(fc) - face2node.begin(fc) ;
-      vector3d<double> fp(0,0,0) ;
-      double w = 0 ;
-      for(int i=0;i<nnodes;++i) {
-        vector3d<double> p1 = (tmp_pos[face2node[fc][i]]) ;
-        vector3d<double> p2 = (tmp_pos[face2node[fc][(i+1)%nnodes]]) ;
-
-        double len = norm(p1-p2) ;
-
-        fp += len*(p1+p2) ;
-        w += len ;
-      }
-      fpos[fc] = fp/(2.*w) ;
-      vector3d<double> a(0,0,0) ;
-      for(int i=0;i<nnodes;++i) {
-        vector3d<double> p1 = (tmp_pos[face2node[fc][i]]) ;
-        vector3d<double> p2 = (tmp_pos[face2node[fc][(i+1)%nnodes]]) ;
-        a += cross(p1-fpos[fc],p2-fpos[fc]) ;
-      }
-      area[fc] = .5*a ;
-    } ENDFORALL ;
-    Map cl,cr ;
-    cl = facts.get_variable("cl") ;
-    cr = facts.get_variable("cr") ;
-    dstore<vector3d<double> > cpos ;
-    dstore<double> cnum ;
-    constraint geom_cells ;
-    geom_cells = facts.get_variable("geom_cells") ;
-    entitySet tmp_cells =  cl.image(*faces) | cr.image(*interior_faces) ;
-    // Add cells owned by this processor!
-    tmp_cells += (*geom_cells)& init_ptn[MPI_rank] ;
-    cpos.allocate(tmp_cells) ;
-    cnum.allocate(tmp_cells) ;
-    FORALL(tmp_cells,cc) {
-      cpos[cc] = vector3d<double>(0,0,0) ;
-      cnum[cc] = 0 ;
-    } ENDFORALL ;
-    FORALL(*faces,fc) {
-      double A = norm(area[fc]) ;
-      cpos[cl[fc]] += A*fpos[fc] ;
-      cnum[cl[fc]] += A ;
-    } ENDFORALL ;
-    FORALL(*interior_faces,fc) {
-      double A = norm(area[fc]) ;
-      cpos[cr[fc]] += A*fpos[fc] ;
-      cnum[cr[fc]] += A ;
-    } ENDFORALL ;
-    Loci::storeRepP cp_sp = cpos.Rep() ;
-    Loci::storeRepP cn_sp = cnum.Rep() ;
-    entitySet clone_cells = tmp_cells - *geom_cells ;
-    std::vector<Loci::storeRepP> v_cpos = send_global_clone_non(cp_sp, clone_cells, init_ptn) ;
-    std::vector<Loci::storeRepP> v_cnum = send_global_clone_non(cn_sp, clone_cells, init_ptn) ;
-    for(int i = 0; i < Loci::MPI_processes; ++i) {
-      entitySet dom = v_cpos[i]->domain() & cpos.domain() ;
-      dstore<vector3d<double> > tmp_cpos(v_cpos[i]) ;
-      dstore<double> tmp_cnum(v_cnum[i]) ;
-      FORALL(dom, di) {
-	cpos[di] += tmp_cpos[di] ;
-	cnum[di] += tmp_cnum[di] ;
-      } ENDFORALL ;
-    }
-    fill_clone(cp_sp, clone_cells, init_ptn) ;
-    fill_clone(cn_sp, clone_cells, init_ptn) ;
-    FORALL(tmp_cells,cc) {
-      cpos[cc] = cpos[cc]/cnum[cc] ;
-    } ENDFORALL ;
-
-    vector<int> broken_faces ;
-
-    FORALL(*interior_faces,fc) {
-      vector3d<double> dv = cpos[cr[fc]]-cpos[cl[fc]] ;
-      vector3d<double> dv2 = fpos[fc]-cpos[cl[fc]] ;
-      vector3d<double> dv3 = cpos[cr[fc]]-fpos[fc] ;
-
-      int t1 = (dot(area[fc],dv) <0.0)?1:0 ;
-      int t2 = (dot(area[fc],dv2) <0.0)?1:0 ;
-      int t3 = (dot(area[fc],dv3) <0.0)?1:0 ;
-      int test = t1+t2+t3 ;
-      if(test != 3 && test != 0) {
-        debugout << "problem with face located at " << fpos[fc]
-                 << endl ;
-        broken_faces.push_back(fc) ;
-      }
-
-
-      else if(t1 == 1) { // Face oriented incorrectly
-	int i = 0 ;
-	int j = face2node.end(fc) - face2node.begin(fc) -1 ;
-	while(i < j) {
-          std::swap(face2node[fc][i],face2node[fc][j]) ;
-	  i++ ;
-	  j-- ;
-	}
-      }
-    } ENDFORALL ;
-
-    entitySet boundary_faces = *faces - *interior_faces ;
-    FORALL(boundary_faces,fc) {
-      const vector3d<double> center = fpos[fc] ;
-
-      vector3d<double> ccenter ;
-      ccenter = cpos[cl[fc]] ;
-      vector3d<double> dv = center-ccenter ;
-      if(dot(area[fc],dv) < 0.0) {
-	int i = 0 ;
-	int j = face2node.end(fc) - face2node.begin(fc) -1 ;
-	while(i < j) {
-          std::swap(face2node[fc][i],face2node[fc][j]) ;
-	  i++ ;
-	  j-- ;
-	}
-      }
-
-    } ENDFORALL ;
-
-    int rsize = 0 ;
-    int size = broken_faces.size() ;
-
-    MPI_Allreduce(&size,&rsize,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
-    if(rsize!=0) {
-      if(MPI_rank == 0) {
-        cerr << "Bad Grid: Non-Convex Cell (centroid outside cell bounds)" << endl ;
-      }
-      Loci::Abort() ;
-    }
-  }
-
-
 
   bool setupFVMGrid(fact_db &facts, string filename) {
     if(!readFVMGrid(facts,filename))
@@ -2694,6 +2538,87 @@ namespace Loci {
 
     return true ;
   }
+
+
+  
+  bool redistribute_cell_weight(storeRepP old_store, storeRepP new_store){
+    //this function is used when weight store is from DB,
+    //old_store is distributed according to the mesh distribution from last cycle
+    //new_store is distributed according to simplePartition
+    entitySet cells = old_store->domain();
+    vector<entitySet> ptn_cells = all_collect_vectors(cells) ;
+    int np = ptn_cells.size();
+    
+    entitySet q_dom = EMPTY;
+    for(int i = 0; i < np; i++){
+      q_dom += ptn_cells[i];
+    }
+    vector<entitySet> simple_ptn = Loci::simplePartition(q_dom.Min(),q_dom.Max(),MPI_COMM_WORLD) ; 
+    vector<entitySet> cell_ptn(np);
+    for(int i = 0; i < np; i++){
+      cell_ptn[i] = cells&simple_ptn[i];
+    }
+    vector<entitySet> cell_ptn_t = transposePtn(cell_ptn);
+    redistribute_container(cell_ptn,cell_ptn_t,cells,old_store,new_store) ;
+    old_store->allocate(EMPTY) ;
+    return true;
+  }
+     
+
+                                
+  bool setupFVMGridWithWeightInFile(fact_db &facts, string filename, string weightfile) {
+    // if(MPI_rank==0)std::cout<<" using setupFVMGridWithWeight" << std::endl;
+    bool orig_load_cell_weights = load_cell_weights;
+    string orig_cell_weight_file = cell_weight_file;
+
+    cell_weight_store = 0;
+    load_cell_weights = true;
+    cell_weight_file = weightfile;
+    
+    if(!readFVMGrid(facts,filename))
+      return false ;
+    
+    memSpace("before create_face_info") ;
+    create_face_info(facts) ;
+    
+    create_ref(facts) ;
+    create_ghost_cells(facts) ;
+    
+    load_cell_weights = orig_load_cell_weights;
+    cell_weight_file = orig_cell_weight_file;  
+    return true ;
+  }
+
+
+ 
+  bool setupFVMGridWithWeightInStore(fact_db &facts, string filename, storeRepP cellwt ) {
+    //if(MPI_rank==0)std::cout<<" using setupFVMGridWithWeightInStore" << std::endl;
+    bool orig_load_cell_weights = load_cell_weights;
+    string orig_cell_weight_file = cell_weight_file;
+    cell_weight_file = "";
+    cell_weight_store = cellwt;
+
+    load_cell_weights = true;
+    
+    
+    if(!readFVMGrid(facts,filename))
+      return false ;
+    
+    memSpace("before create_face_info") ;
+    create_face_info(facts) ;
+    
+    create_ref(facts) ;
+    create_ghost_cells(facts) ;
+
+    load_cell_weights = orig_load_cell_weights;
+    cell_weight_file = orig_cell_weight_file; 
+    cell_weight_store = 0;
+    cellwt = 0;
+    return true ;
+  }
+
+
+  
 
 
 }

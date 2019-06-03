@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -70,7 +70,11 @@ namespace Loci {
   }
 
   storeRepP constraintRep::remap(const dMap &m) const {
-    entitySet newconstraint = m.image(m.domain()&constraint_set) ;
+    
+    entitySet newconstraint = ~EMPTY ;
+    if(constraint_set != ~EMPTY)
+      newconstraint = m.image(m.domain()&constraint_set) ;
+
     constraint r ;
     r = newconstraint ;
     return r.Rep() ;

@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2015, Mississippi State University
+//# Copyright 2015-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -41,6 +41,10 @@ namespace Loci {
       return new accessMapRepI(p) ; }
     virtual storeRepP remap(const dMap &m) const
     { entitySet newImage = m.image(m.domain()&imageMap) ;
+      return new accessMapRepI(newImage) ;
+    } 
+    virtual storeRepP MapRemap(const dMap &dm, const dMap &rm) const
+    { entitySet newImage = dm.image(dm.domain()&imageMap) ;
       return new accessMapRepI(newImage) ;
     } 
     virtual void compose(const dMap &m, const entitySet &context) {}
