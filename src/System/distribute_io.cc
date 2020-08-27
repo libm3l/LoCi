@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -823,6 +823,28 @@ namespace Loci {
     return sv_t ;
   }
 
+  // convert domain in local numbering into key space
+  int getKeyDomain(entitySet dom, fact_db::distribute_infoP dist, MPI_Comm comm) {
+    int kdl = -1 ;
+    FORALL(dom,i) {
+      int key = dist->key_domain[i] ;
+      kdl = std::max<int>(key,kdl) ;
+    } ENDFORALL ;
+    int kd=-1 ;
+    MPI_Allreduce(&kdl,&kd,1,MPI_INT,MPI_MAX,comm) ;
+    
+    bool failure = false ;
+    FORALL(dom,i) {
+      int key = dist->key_domain[i] ;
+      if(kd != key){
+	failure = true ;
+      }
+    } ENDFORALL ;
+
+    if(failure) return -1 ;
+    else return kd ;
+  }
+
 
   // Convert container from local numbering to file numbering
   // pass in store rep pointer: sp
@@ -850,9 +872,14 @@ namespace Loci {
     // This shouldn't happen
     FATAL(dom.size() != dom_global.size()) ;
 
+    int kd =  getKeyDomain(dom, dist, comm) ;
+    if(kd< 0) {
+      cerr << "Local2FileOrder not in single keyspace!" << endl ;
+      kd = 0 ;
+    }
     // Now get global to file numbering
     dMap g2f ;
-    g2f = dist->g2f.Rep() ;
+    g2f = dist->g2fv[kd].Rep() ;
 
     // Compute map from local numbering to file numbering
     Map newnum ;
@@ -992,7 +1019,13 @@ namespace Loci {
       
    
     fact_db::distribute_infoP dist = facts.get_distribute_info() ;
-    vector<entitySet> out_ptn = facts.get_init_ptn() ;
+    int kd =  getKeyDomain(dom, dist, comm) ;
+    if(kd < 0) {
+      cerr << "unable to finde key domain in File2LocalOrderOutput"
+	   << endl ;
+      kd = 0 ;
+    }
+    vector<entitySet> out_ptn = facts.get_init_ptn(kd) ; 
     // Get mapping from local to global numbering
     Map l2g ;
     l2g = dist->l2g.Rep() ;
@@ -1112,8 +1145,15 @@ namespace Loci {
     newnum.allocate(resultSet) ;
 
     if(dist !=0 ) {
+      int kd =  getKeyDomain(resultSet, dist, comm) ;
+
+      if(kd < 0) {
+	cerr << "File2LocalOrder not in single keyspace!" << endl ;
+	kd = 0 ;
+      }
+
       dMap g2f ;
-      g2f = dist->g2f.Rep() ;
+      g2f = dist->g2fv[kd].Rep() ;
       Map l2g ;
       l2g = dist->l2g.Rep() ;
       FORALL(resultSet,i) {
@@ -1307,6 +1347,30 @@ namespace Loci {
       H5Gclose(group_id) ;
   }
 
+  int getMinFileNumberFromLocal(entitySet read_set,
+				fact_db::distribute_infoP dist ) {
+
+    int minIDfl = std::numeric_limits<int>::max() ;
+    int kd =  getKeyDomain(read_set, dist, MPI_COMM_WORLD) ;
+    if(kd< 0) {
+      cerr << "read_set not in single keyspace!" << endl ;
+      kd = 0 ;
+    }
+    // Now get global to file numbering
+    dMap g2f ;
+    g2f = dist->g2fv[kd].Rep() ;
+    Map l2g ;
+    l2g = dist->l2g.Rep() ;
+    
+    // Compute map from local numbering to file numbering
+    FORALL(read_set,ii) {
+      minIDfl = min(minIDfl,g2f[l2g[ii]]) ;
+    } ENDFORALL ;
+    int minIDf = minIDfl ;
+    MPI_Allreduce(&minIDfl,&minIDf,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD) ;
+    return minIDf ;
+  }
+  
   void read_container_redistribute(hid_t file_id, std::string vname,
                                    storeRepP var, entitySet read_set,
                                    fact_db &facts) {
@@ -1330,10 +1394,18 @@ namespace Loci {
     storeRepP new_store = var->new_store(EMPTY) ;
     read_store( group_id, new_store,offset,MPI_COMM_WORLD) ;
       
-    
+
     // map from file number to local numbering
     fact_db::distribute_infoP dist = facts.get_distribute_info() ;
     if(dist != 0) {
+      // Correct offset if file numbering changes.  Assume read_set is being
+      // read in over the same set
+      int minID = offset ;
+      MPI_Bcast(&minID,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      const int minIDf = getMinFileNumberFromLocal(read_set,dist) ;
+      const int correct = minIDf - minID ;
+      offset += correct  ;
+
       // Allocate space for reordered container
       storeRepP result = var->new_store(read_set) ;
       File2LocalOrder(result,read_set,new_store,offset,dist,MPI_COMM_WORLD) ;
@@ -1344,13 +1416,15 @@ namespace Loci {
       }
       var->copy(result,read_set) ;
     } else {
-      if(offset != 0) {
-        // shift new store by offset to correct alignment
-        new_store->shift(offset) ;
-      }
       if(read_set == EMPTY) {
         read_set = new_store->domain() ;
         var->allocate(read_set) ;
+      } else {
+	offset = read_set.Min() - new_store->domain().Min() ;
+	if(offset != 0) {
+	  // shift new store by offset to correct alignment
+	  new_store->shift(offset) ;
+	}
       }
       var->copy(new_store,read_set) ;
     }
@@ -1366,9 +1440,15 @@ namespace Loci {
     if(MPI_processes > 1) {
       Map l2g ;
       fact_db::distribute_infoP df = facts.get_distribute_info() ;
+      int kd =  getKeyDomain(local_set, df, MPI_COMM_WORLD) ;
+      if(kd < 0) {
+	cerr << "unable to find distribute info in writeSetIds" << endl; 
+	kd = 0 ;
+      }
+
       l2g = df->l2g.Rep() ;
       dMap g2f ;
-      g2f = df->g2f.Rep() ;
+      g2f = df->g2fv[kd].Rep() ;
       FORALL(local_set,ii) {
         ids[c++] = g2f[l2g[ii]] ;
       } ENDFORALL ;

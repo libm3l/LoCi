@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2015, Mississippi State University
+//# Copyright 2015-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -52,7 +52,7 @@ namespace Loci{
     
     //expand map face2node
     if(Loci::MPI_processes > 1){
-      vector<entitySet> init_ptn = facts.get_init_ptn() ;
+      vector<entitySet> init_ptn = facts.get_init_ptn(0) ; // FIX THIS
       entitySet out_of_dom = face_dom - face2node.domain();
       face2node.setRep(MapRepP(face2node.Rep())->expand(out_of_dom, init_ptn));
     }

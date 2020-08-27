@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -264,7 +264,9 @@ typedef int MPI_Copy_function(MPI_Comm, int, void *, void *, void *, int *);
 typedef int MPI_Delete_function(MPI_Comm, int, void *, void *);
 typedef void MPI_Handler_function(MPI_Comm *, int *, ...);
 typedef void MPI_User_function(void *, void *, int *, MPI_Datatype *); 
-
+extern void MPI_Comm_create_errhandler(void (*v)(MPI_Comm *,int*,...),
+				       MPI_Errhandler *e);
+  extern void MPI_Comm_set_errhandler(MPI_Comm comm, unsigned int f) ;
 MPI_Copy_function		MPI_NULL_COPY_FN, MPI_DUP_FN;
 MPI_Delete_function		MPI_NULL_DELETE_FN;
 

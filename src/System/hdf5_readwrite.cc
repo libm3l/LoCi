@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -125,9 +125,8 @@ namespace Loci {
              H5P_DEFAULT, data);
 
     eset = EMPTY;
-    for(size_t i=0;i< dimension;i++){
+    for(size_t i=0;i< dimension;i+=2){
       eset |= interval(data[i],data[i+1]);
-      i++;
     }
     delete [] data;
     H5Sclose(dataspace);

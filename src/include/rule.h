@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -772,6 +772,8 @@ namespace Loci {
   
   template <class T> struct NullOp {
     void operator()(T &res, const T &arg)
+    { std::cerr << "join should not be called for NullOp" << std::endl; }
+    void operator()(Vect<T> &res, const Vect<T> &arg)
     { std::cerr << "join should not be called for NullOp" << std::endl; }
   } ;
 

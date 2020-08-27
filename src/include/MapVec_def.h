@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -54,6 +54,7 @@ namespace Loci {
     virtual storeRep *new_store(const entitySet &p) const ;
     virtual storeRep *new_store(const entitySet &p, const int* cnt) const ;
     virtual storeRepP remap(const dMap &m) const ;
+    virtual storeRepP MapRemap(const dMap &dm, const dMap &rm) const ;
     virtual void compose(const dMap &m, const entitySet &context) ;
     virtual void copy(storeRepP &st, const entitySet &context) ;
     virtual void gather(const dMap &m, storeRepP &st,
@@ -120,8 +121,8 @@ namespace Loci {
     const VEC &operator[](int indx) const { return const_elem(indx) ; }
     std::ostream &Print(std::ostream &s) const { return Rep()->Print(s) ; }
     std::istream &Input(std::istream &s) { return Rep()->Input(s) ; }
-    int getRangeKeySpace() const { return MapRepP(rep)->getRangeKeySpace() ; }
-    void setRangeKeySpace(int v) { MapRepP(rep)->setRangeKeySpace(v) ; }
+    int getRangeKeySpace() const { return MapRepP(Rep())->getRangeKeySpace() ; }
+    void setRangeKeySpace(int v) { MapRepP(Rep())->setRangeKeySpace(v) ; }
   } ;
 
   template<int M> class const_MapVec : public store_instance {
@@ -157,7 +158,7 @@ namespace Loci {
       return base_ptr[indx]; }
     const VEC &operator[](int indx) const { return const_elem(indx) ; }
     std::ostream &Print(std::ostream &s) const { return Rep()->Print(s) ; }
-    int getRangeKeySpace() const { return MapRepP(rep)->getRangeKeySpace() ; }
+    int getRangeKeySpace() const { return MapRepP(Rep())->getRangeKeySpace() ; }
   } ;  
   
 } // end of namespace Loci

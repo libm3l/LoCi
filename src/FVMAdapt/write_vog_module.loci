@@ -91,8 +91,10 @@ public:
 register_rule<node_output_file> register_node_output_file;
 
 
-
-
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#endif
 
 class face_output_file : public pointwise_rule {
  
@@ -154,8 +156,8 @@ public:
     long long numFaces = 0;
     for(int i =0; i < MPI_processes; i++) numFaces += face_sizes[i];
 
-    long long cell_min = numNodes + numFaces +1;
-    long long face_min = numNodes+1;
+    long long cell_min = 1 ; //numNodes + numFaces +1;
+    long long face_min = std::numeric_limits<int>::min()+1024 ; //numNodes+1;
     for(int i =0; i < MPI_rank; i++) face_min += face_sizes[i];
     long long face_max = face_min + face_sizes[MPI_rank] -1;
 
@@ -203,6 +205,9 @@ public:
 
 register_rule<face_output_file> register_face_output_file;
 
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 
 class volTag_output_file : public singleton_rule {

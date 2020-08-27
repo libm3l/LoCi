@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2008, 2015, Mississippi State University
+//# Copyright 2008-2019, Mississippi State University
 //#
 //# This file is part of the Loci Framework.
 //#
@@ -135,7 +135,11 @@ namespace Loci {
   } ;
 
   bool readFVMGrid(fact_db &facts, std::string filename) ;
+  
   bool setupFVMGrid(fact_db &facts, std::string filename) ;
+  bool setupFVMGridWithWeightInStore(fact_db &facts, std::string filename, storeRepP cellwt );
+  bool setupFVMGridWithWeightInFile(fact_db &facts, std::string filename, std::string weightfile);
+
   bool readBCfromVOG(std::string filename,
                      std::vector<std::pair<int,std::string> > &boundary_ids) ;
   void setupBoundaryConditions(fact_db &facts) ;
@@ -151,6 +155,7 @@ namespace Loci {
                        std::vector<std::pair<int,std::string> >& surfaceids,
                        std::vector<std::pair<std::string,entitySet> >& volTags) ;
 
+  void setupOverset(fact_db &facts) ;
   void setupPosAutoDiff(fact_db &facts) ;
   void setupPosAutoDiff(fact_db &facts,std::string filename) ;
 
