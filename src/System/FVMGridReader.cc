@@ -119,6 +119,7 @@ namespace Loci {
   }
   extern bool use_simple_partition ;
   extern bool use_orb_partition ;
+  extern bool use_sfc_partition ;
   extern bool load_cell_weights ;
   extern string cell_weight_file ;
   extern storeRepP cell_weight_store ; 
@@ -417,6 +418,7 @@ namespace Loci {
       int bufsz = buf.size() ;
       MPI_Bcast(&bufsz,1,MPI_INT,0,MPI_COMM_WORLD) ;
       char *data = new char[bufsz+1] ;
+      data[bufsz] = 0 ;
       if(MPI_rank == 0)
         strcpy(data,buf.c_str()) ;
       MPI_Bcast(data,bufsz,MPI_CHAR,0,MPI_COMM_WORLD) ;
@@ -1986,6 +1988,389 @@ namespace Loci {
 
   }
 
+  ///////////////////////////////////////////////////
+  // these are the codes for hilbert curve partition
+  ///////////////////////////////////////////////////
+
+  // Hilbert Key
+  typedef Loci::Array<unsigned int, 3> HilbertCode ;
+  // Integer coordinate
+  typedef Loci::Array<unsigned int, 3> IntCoord3 ;
+
+  ///////////////////////////////////////////////////
+  // these are the codes for hilbert curve partition
+  ///////////////////////////////////////////////////
+  // mask for 3D
+  const unsigned int g_mask[] = {4,2,1} ;
+  
+  HilbertCode hilbert_encode(const IntCoord3& p) {
+    const int DIM = 3 ;
+    const int WORDBITS = 32 ;
+    const int NUMBITS = 32 ;
+    unsigned int mask = (unsigned long)1 << (WORDBITS - 1) ;
+    unsigned int element, temp1, temp2, A, W = 0, S, tS, T, tT, J, P = 0, xJ;
+    
+    HilbertCode	h;
+    h[0] = 0;
+    h[1] = 0;
+    h[2] = 0;
+    
+    int	i = NUMBITS * DIM - DIM, j;
+    
+    for (j = A = 0; j < DIM; j++)
+      if (p[j] & mask)
+        A |= g_mask[j];
+    
+    S = tS = A;
+    
+    P |= S & g_mask[0];
+    for (j = 1; j < DIM; j++)
+      if( (S & g_mask[j]) ^ ((P >> 1) & g_mask[j]))
+        P |= g_mask[j];
+    
+    /* add in DIM bits to hcode */
+    element = i / WORDBITS;
+    if (i % WORDBITS > WORDBITS - DIM) {
+      h[element] |= P << (i % WORDBITS);
+      h[element + 1] |= P >> (WORDBITS - i % WORDBITS);
+    } else
+      h[element] |= P << (i - element * WORDBITS);
+
+    J = DIM;
+    for (j = 1; j < DIM; j++)
+      if ((P >> j & 1) == (P & 1))
+        continue;
+      else
+        break;
+    if (j != DIM)
+      J -= j;
+    xJ = J - 1;
+    
+    if (P < 3)
+      T = 0;
+    else
+      if (P % 2)
+        T = (P - 1) ^ (P - 1) / 2;
+      else
+        T = (P - 2) ^ (P - 2) / 2;
+    tT = T;
+    
+    for (i -= DIM, mask >>= 1; i >=0; i -= DIM, mask >>= 1) {
+      for (j = A = 0; j < DIM; j++)
+        if (p[j] & mask)
+          A |= g_mask[j];
+      
+      W ^= tT;
+      tS = A ^ W;
+      if (xJ % DIM != 0) {
+        temp1 = tS << (xJ % DIM) ;
+        temp2 = tS >> (DIM - xJ % DIM);
+        S = temp1 | temp2;
+        S &= ((unsigned int)1 << DIM) - 1;
+      } else
+        S = tS;
+
+      P = S & g_mask[0];
+      for (j = 1; j < DIM; j++)
+        if( (S & g_mask[j]) ^ ((P >> 1) & g_mask[j]))
+          P |= g_mask[j];
+      
+      /* add in DIM bits to hcode */
+      element = i / WORDBITS;
+      if (i % WORDBITS > WORDBITS - DIM) {
+        h[element] |= P << (i % WORDBITS);
+        h[element + 1] |= P >> (WORDBITS - i % WORDBITS);
+      } else
+        h[element] |= P << (i - element * WORDBITS);
+
+      if (i > 0) {
+        if (P < 3)
+          T = 0;
+        else
+          if (P % 2)
+            T = (P - 1) ^ (P - 1) / 2;
+          else
+            T = (P - 2) ^ (P - 2) / 2;
+        
+        if (xJ % DIM != 0) {
+          temp1 = T >> xJ % DIM;
+          temp2 = T << (DIM - xJ % DIM);
+          tT = temp1 | temp2;
+          tT &= ((unsigned int)1 << DIM) - 1;
+        } else
+          tT = T;
+        
+        J = DIM;
+        for (j = 1; j < DIM; j++)
+          if ((P >> j & 1) == (P & 1))
+            continue;
+          else
+            break;
+        if (j != DIM)
+          J -= j;
+        
+        xJ += J - 1;
+
+      }
+    }
+    return h;
+  }
+
+  struct SFC_Key {
+    HilbertCode key ;
+    Entity fid ;
+    int weight ;
+  } ;
+
+  inline bool operator<(const SFC_Key &k1, const SFC_Key &k2) {
+    return
+      ( (k1.key[2]<k2.key[2]) ||
+        (k1.key[2]==k2.key[2]&&k1.key[1]<k2.key[1]) ||
+        (k1.key[2]==k2.key[2]&&k1.key[1]==k2.key[1]&&k1.key[0]<k2.key[0])) ;
+  }
+
+  inline bool firstCompare(const pair<int,int> &i1, const pair<int,int> &i2) {
+    return i1.first < i2.first ;
+  }
+    
+  void SFC_Partition_Mesh(const vector<entitySet> &local_nodes,
+                          const vector<entitySet> &local_faces,
+                          const vector<entitySet> &local_cells,
+                          const store<vector3d<double> > &pos,
+                          const Map &cl, const Map &cr,
+                          const multiMap &face2node,
+			  const store<string> &boundary_tags,
+			  const store<int> &cell_weights,
+                          vector<entitySet> &cell_ptn,
+                          vector<entitySet> &face_ptn,
+                          vector<entitySet> &node_ptn) {
+
+    vector<entitySet> tmp(MPI_processes) ; // Initialize partition vectors
+    cell_ptn = tmp ;
+    face_ptn = tmp ;
+    node_ptn = tmp ;
+
+    
+    entitySet fdom = face2node.domain() ;
+    const int fsz = fdom.size();
+
+    vector<HilbertCode> fhcode(fdom.size()) ;
+    //----------------------------------------------------------------------
+    // Compute face Hilbert Code
+    //----------------------------------------------------------------------
+    { dstore<vector3d<float> > tmp_pos ;
+      FORALL(pos.domain(),pi) {
+	tmp_pos[pi] = vector3d<float>(realToFloat(pos[pi].x),
+				      realToFloat(pos[pi].y),
+				      realToFloat(pos[pi].z)) ;
+      } ENDFORALL ;
+      entitySet total_dom =
+	Loci::MapRepP(face2node.Rep())->image(fdom) + pos.domain() ;
+      Loci::storeRepP sp = tmp_pos.Rep() ;
+      vector<entitySet> ptn = local_nodes ;
+      fill_clone(sp,total_dom,ptn) ;
+      int i=0 ;
+      vector<vector3d<float> > fcenter(fsz) ;
+      FORALL(fdom,fc) {
+	int sz = face2node[fc].size() ;
+	vector3d<float> pnt(0.,0.,0.) ;
+	for(int ii=0;ii<sz;++ii)
+	  pnt += tmp_pos[face2node[fc][ii]] ;
+	pnt *= 1./float(sz) ;
+	fcenter[i++] = pnt ;
+      } ENDFORALL ;
+      vector3d<float> pmaxl(-1e30,-1e30,-1e30),pminl(1e30,1e30,1e30) ;
+      for(int i=0;i<fsz;++i) {
+	pmaxl.x = max(pmaxl.x,fcenter[i].x) ;
+	pmaxl.y = max(pmaxl.y,fcenter[i].y) ;
+	pmaxl.z = max(pmaxl.z,fcenter[i].z) ;
+	pminl.x = min(pminl.x,fcenter[i].x) ;
+	pminl.y = min(pminl.y,fcenter[i].y) ;
+	pminl.z = min(pminl.z,fcenter[i].z) ;
+      }
+      vector3d<float> pmax = pmaxl, pmin=pminl ;
+      MPI_Allreduce(&(pmaxl.x),&(pmax.x),3,MPI_FLOAT,MPI_MAX,
+		    MPI_COMM_WORLD) ;
+      MPI_Allreduce(&(pminl.x),&(pmin.x),3,MPI_FLOAT,MPI_MIN,
+		    MPI_COMM_WORLD) ;
+      double s = 4e-9/max(max(max(pmax.x-pmin.x,1e-3f),pmax.y-pmin.y),
+			  pmax.z-pmin.y) ;
+
+      for(int i=0;i<fsz;++i) {
+	IntCoord3 p ;
+	p[0] = (unsigned int)(s*(fcenter[i].x-pmin.x)) ;
+	p[1] = (unsigned int)(s*(fcenter[i].y-pmin.y)) ;
+	p[2] = (unsigned int)(s*(fcenter[i].z-pmin.z)) ;
+	fhcode[i] = hilbert_encode(p) ;
+      }      
+    }
+    vector<int  > fweight(fdom.size(),1) ;
+    //----------------------------------------------------------------------
+    // Compute face weight
+    //----------------------------------------------------------------------
+    entitySet cdom = cell_weights.domain() ;
+    if(cdom != EMPTY) {
+      dstore<int> cell_weights_tmp ;
+      FORALL(cdom,pi) {
+	cell_weights_tmp[pi] = cell_weights[pi] ;
+      } ENDFORALL ;
+      entitySet total_dom =
+	Loci::MapRepP(cl.Rep())->image(fdom) +
+	Loci::MapRepP(cr.Rep())->image(fdom) +
+	cell_weights.domain() ;
+      // remove clones ;
+      total_dom -= interval(-1,Loci::UNIVERSE_MIN) ;
+      Loci::storeRepP sp = cell_weights_tmp.Rep() ;
+      vector<entitySet> ptn = local_cells ;
+      fill_clone(sp,total_dom,ptn) ;
+      int i=0 ;
+      FORALL(fdom,fc) {
+	int w = cell_weights_tmp[cl[fc]] ;
+	if(cr[fc] >= 0)
+	  w = (w + cell_weights_tmp[cr[fc]])/2 ;
+	fweight[i++] = w ;
+      } ENDFORALL ;
+    }
+
+    // Sort according to Hilbert Key
+    vector<SFC_Key> key_list(fdom.size()) ;
+    vector<int> fszlist(MPI_processes,0) ;
+    MPI_Allgather(&fsz,1,MPI_INT,&fszlist[0],1,MPI_INT,MPI_COMM_WORLD) ;
+    vector<int> foffsets(MPI_processes,0) ;
+    for(int i=1;i<MPI_processes;++i)
+      foffsets[i] = foffsets[i-1]+fszlist[i-1] ;
+    int i=0;
+    FORALL(fdom,fc) {
+      key_list[i].key = fhcode[i] ;
+      key_list[i].fid = foffsets[MPI_rank]+i ;
+      key_list[i].weight = fweight[i] ;
+      i++ ;
+    } ENDFORALL ;
+    Loci::parSampleSort(key_list,MPI_COMM_WORLD) ;
+    // Now analyze weights to see if we need to do weighted partitions
+    double wsuml = 0, usuml = 0, wmaxl = 0 ;
+    for(size_t ii=0;ii<key_list.size();++ii) {
+      usuml += 1.0 ;
+      wsuml += key_list[ii].weight ;
+      wmaxl = max(wmaxl,double(key_list[ii].weight)) ;
+    }
+    double wsum=wsuml, usum=usuml, wmax=wmaxl ;
+    MPI_Allreduce(&wsuml,&wsum,1,MPI_DOUBLE,MPI_SUM, MPI_COMM_WORLD) ;
+    MPI_Allreduce(&usuml,&usum,1,MPI_DOUBLE,MPI_SUM, MPI_COMM_WORLD) ;
+    MPI_Allreduce(&wmaxl,&wmax,1,MPI_DOUBLE,MPI_MAX, MPI_COMM_WORLD) ;
+
+    double wavg = wsum/usum ;
+    if(wavg*2.5 > wmax) {
+      // low standard deviation, make outlier set zero size
+      // (note outliers are those that are greater than the mean)
+      wavg = wmax+1 ;
+    }
+    double w_low = 0, w_high = 0 ;
+    int c_low = 0, c_high=0 ;
+    for(size_t ii=0;ii<key_list.size();++ii) {
+      if(key_list[ii].weight<=wavg) {
+	w_low += key_list[ii].weight ;
+	c_low++ ;
+      } else {
+	w_high += key_list[ii].weight ;
+	c_high++ ;
+      }
+    }
+    // Partition low processors
+    vector<double> w_lowv(MPI_processes) ;
+    MPI_Allgather(&w_low,1,MPI_DOUBLE,&w_lowv[0],1,MPI_DOUBLE,
+		  MPI_COMM_WORLD) ;
+    vector<double> w_highv(MPI_processes) ;
+    MPI_Allgather(&w_high,1,MPI_DOUBLE,&w_highv[0],1,MPI_DOUBLE,
+		  MPI_COMM_WORLD) ;
+    double proc_sumw_low = 0 ;
+    double tot_sumw_low = 0 ;
+    double proc_sumw_high = 0 ;
+    double tot_sumw_high = 0 ;
+    for(int i=0;i<MPI_processes;++i) {
+      if(i<MPI_rank) {
+	proc_sumw_low += w_lowv[i] ;
+	proc_sumw_high += w_highv[i] ;
+      }
+      tot_sumw_low += w_lowv[i] ;
+      tot_sumw_high += w_highv[i] ;
+    }
+    // Now assign weights
+    double sumw_low_pp = tot_sumw_low/double(MPI_processes) ;
+    double sumw_high_pp = tot_sumw_high/double(MPI_processes) ;
+    vector<int> procs(key_list.size()) ;
+    w_low = proc_sumw_low ;
+    w_high = proc_sumw_high ;
+    for(size_t ii=0;ii<key_list.size();++ii) {
+      if(key_list[ii].weight<=wavg) {
+	procs[ii] = max(0,min(MPI_processes-1,int(floor(w_low/sumw_low_pp)))) ;
+	w_low += key_list[ii].weight ;
+      } else {
+	procs[ii] = max(0,min(MPI_processes-1,int(floor(w_high/sumw_high_pp)))) ;
+	w_high += key_list[ii].weight ;
+	c_high++ ;
+      }
+    }
+    vector<double> wsump(MPI_processes,0) ;
+    for(size_t ii=0;ii<key_list.size();++ii) {
+      wsump[procs[ii]]+= key_list[ii].weight ;
+    }
+    vector<double> wsumr(MPI_processes,0) ;
+    MPI_Allreduce(&wsump[0],&wsumr[0],MPI_processes,MPI_DOUBLE,
+		  MPI_SUM,MPI_COMM_WORLD) ;
+    debugout << "processor weights =" ;
+    for(int i=0;i<MPI_processes;++i) 
+      debugout << " " << wsumr[i] ;
+    debugout << endl ;
+
+    vector<pair<int,int> > proc_pairs(key_list.size()) ;
+    for(size_t ii=0;ii<key_list.size();++ii)
+      proc_pairs[ii] = pair<int,int>(key_list[ii].fid,procs[ii]) ;
+    vector<pair<int,int> > splitters(MPI_processes-1) ;
+    for(int i=0;i<MPI_processes-1;++i) {
+      splitters[i].first  = foffsets[i+1] ;
+      splitters[i].second = -1 ;
+    }
+    sort(proc_pairs.begin(),proc_pairs.end(),firstCompare) ;
+    parSplitSort(proc_pairs,splitters,firstCompare,MPI_COMM_WORLD) ;
+    vector<int> fprocmap(fdom.size()) ;
+
+    for(int i=0;i<fsz;++i)
+      fprocmap[i] = proc_pairs[i].second ;
+    
+    
+    i=0 ;
+    // Create face_ptn ;
+    FORALL(fdom,fc) {
+      face_ptn[fprocmap[i++]] += fc ;
+    } ENDFORALL ;
+
+    // Now find node_ptn and cell_ptn that best matches the face partition
+    vector<pair<int,pair<int,int> > > scratchPad ;
+    i=0 ;
+    FORALL(fdom,fc) {
+      pair<int,int> p2i(fprocmap[i++],1) ;
+      int sz = face2node[fc].size() ;
+      for(int ii=0;ii<sz;++ii)
+        scratchPad.push_back(pair<int,pair<int,int> >(face2node[fc][ii],p2i)) ;
+    } ENDFORALL ;
+
+    assignOwner(scratchPad,local_nodes,node_ptn) ;
+
+
+    entitySet refset = boundary_tags.domain() ;
+    scratchPad.clear() ;
+    i=0 ;
+    FORALL(fdom,fc) {
+      pair<int,int> p2i(fprocmap[i++],1) ;
+      scratchPad.push_back(pair<int,pair<int,int> >(cl[fc],p2i)) ;
+      if(!refset.inSet(cr[fc]))
+        scratchPad.push_back(pair<int,pair<int,int> >(cr[fc],p2i)) ;
+    } ENDFORALL ;
+
+    assignOwner(scratchPad,local_cells,cell_ptn) ;
+  }
+  
     
   void ORB_Partition_Mesh(const vector<entitySet> &local_nodes,
                           const vector<entitySet> &local_faces,
@@ -2169,6 +2554,68 @@ namespace Loci {
                          t_pos, tmp_cl, tmp_cr, tmp_face2node,
 			 tmp_boundary_tags,
                          cell_ptn,face_ptn,node_ptn) ;
+    } else if(use_sfc_partition) {
+      store<int> cell_weights ;
+      // read in additional vertex weights if any
+      if(load_cell_weights) {
+	// check if the file exists
+	int file_exists = 1 ;
+	if(Loci::MPI_rank == 0) {
+	  struct stat buf ;
+	  if(stat(cell_weight_file.c_str(),&buf) == -1 ||
+	     !S_ISREG(buf.st_mode))
+	    file_exists = 0 ;
+	}
+	MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
+	
+	if(file_exists == 1) {
+	  debugout << "reading cell weights" << endl ;
+	  if(Loci::MPI_rank == 0) {
+	    std::cout << "Space Filling Curve partition reading additional cell weights from: "
+		      << cell_weight_file << std::endl ;
+	  }
+	    
+	  // create a hdf5 handle
+	  hid_t file_id = Loci::hdf5OpenFile(cell_weight_file.c_str(),
+					     H5F_ACC_RDONLY, H5P_DEFAULT) ;
+	  if(file_id < 0) {
+	    std::cerr << "...file reading failed..., Aborting" << std::endl ;
+	    Loci::Abort() ;
+	  }
+            
+	  // read
+	   
+	  
+	  readContainerRAW(file_id,"cell weight", cell_weights.Rep(),
+			   MPI_COMM_WORLD) ;
+	  Loci::hdf5CloseFile(file_id) ;
+	} else if(cell_weight_store != 0){
+	  debugout << "getting cell_weights_store" << endl ;
+	  entitySet dom = local_cells[MPI_rank];
+	  cell_weights.allocate(dom);
+	  redistribute_cell_weight(cell_weight_store, cell_weights.Rep());
+	}
+          
+	if(file_exists == 1 || cell_weight_store != 0){ 
+
+	  int offset = local_cells[Loci::MPI_rank].Min()-cell_weights.domain().Min() ;
+
+	  storeRepP sp = cell_weights.Rep();
+	  sp->shift(offset) ;
+
+	  
+	  if(cell_weights.domain() != local_cells[Loci::MPI_rank]) {
+	    cerr << "cell_weights=" << cell_weights.domain() << ", local_cells = " << local_cells[Loci::MPI_rank] << endl ;
+	    cerr << "cell weights partition inconsistent!" << endl ;
+	    Loci::Abort() ;
+	  }
+	}
+      }
+      SFC_Partition_Mesh(local_nodes, local_faces, local_cells,
+                         t_pos, tmp_cl, tmp_cr, tmp_face2node,
+			 tmp_boundary_tags,
+			 cell_weights,
+                         cell_ptn,face_ptn,node_ptn) ;
     } else {
       // Partition Cells
       bool useMetis = !use_simple_partition ;
@@ -2187,7 +2634,7 @@ namespace Loci {
         cell_ptn = newMetisPartitionOfCells(local_cells,tmp_cl,tmp_cr,tmp_boundary_tags) ;
 #else
 	if(MPI_rank==0) {
-          debugout << "METIS disabled:: Use Simple Partition - Based on Space Filling Curve! "<< endl ;
+          debugout << "METIS disabled:: Using simple partition" << endl ;
           useMetis = false ;
         }
 #endif
@@ -2234,43 +2681,74 @@ namespace Loci {
           }
           
           if(file_exists == 1 || cell_weight_store != 0){ 
-            
+
+	    int offset = local_cells[Loci::MPI_rank].Min()-cell_weights.domain().Min() ;
+
+	    storeRepP sp = cell_weights.Rep();
+	    sp->shift(offset) ;
+	    
 	    if(cell_weights.domain() != local_cells[Loci::MPI_rank]) {
+	      cerr << "cell_weights=" << cell_weights.domain() << ", local_cells = " << local_cells[Loci::MPI_rank] << endl ;
 	      cerr << "cell weights partition inconsistent!" << endl ;
 	      Loci::Abort() ;
 	    }
         
-	   
-	    int tot_weight = 0 ;
 
+	    int tot_weight1 = 0 ;
+	    int tot_weight2 = 0 ;
+	    
 	    cell_ptn[MPI_rank] = EMPTY ;
 	    entitySet dom = cell_weights.domain() ;
 	    FORALL(dom,i) {
-	      tot_weight += cell_weights[i] ;
+	      if(cell_weights[i] <= 1)
+		tot_weight1++ ;
+	      else
+		tot_weight2 += cell_weights[i] ;
 	    } ENDFORALL ;
-	    vector<int> pweights(MPI_processes,0) ;
-	    MPI_Allgather(&tot_weight,1,MPI_INT,&pweights[0],1,MPI_INT,
+	    vector<int> pweights1(MPI_processes,0) ;
+	    MPI_Allgather(&tot_weight1,1,MPI_INT,&pweights1[0],1,MPI_INT,
 			  MPI_COMM_WORLD) ;
-	    vector<int> woffsets(MPI_processes+1,0) ;
-	    for(int i=0;i<MPI_processes;++i)
-	      woffsets[i+1] = pweights[i]+woffsets[i] ;
+	    vector<int> pweights2(MPI_processes,0) ;
+	    MPI_Allgather(&tot_weight2,1,MPI_INT,&pweights2[0],1,MPI_INT,
+			  MPI_COMM_WORLD) ;
+	    
+	    vector<int> woffsets1(MPI_processes+1,0) ;
+	    vector<int> woffsets2(MPI_processes+1,0) ;
+	    for(int i=0;i<MPI_processes;++i) {
+	      woffsets1[i+1] = pweights1[i]+woffsets1[i] ;
+	      woffsets2[i+1] = pweights2[i]+woffsets2[i] ;
+	    }
 
 	    // compute the weight per processor
-	    int wpp = ((woffsets[MPI_processes]+MPI_processes-1)/MPI_processes) ;
+	    int wpp1 = ((woffsets1[MPI_processes]+MPI_processes-1)/MPI_processes) ;
+	    int wpp2 = ((woffsets2[MPI_processes]+MPI_processes-1)/MPI_processes) ;
 	    // Now compute local weighted sums
-	    int ncel = cell_weights.domain().size() ;
-	    vector<int> wts(ncel+1,woffsets[MPI_rank]) ;
-	    int cnt = 0 ;
+	    int ncel = dom.size() ;
+	    vector<int> wts1(tot_weight1+1, woffsets1[MPI_rank]) ;
+	    vector<int> wts2(ncel-tot_weight1+1,woffsets2[MPI_rank]) ;
+	    int cnt1 = 0 ;
+	    int cnt2 = 0 ;
 	    FORALL(dom,i) {
-	      wts[cnt+1] = wts[cnt] + cell_weights[i] ;
-	      cnt++ ;
+	      if(cell_weights[i] <= 1) {
+		wts1[cnt1+1] = wts1[cnt1]+1 ;
+		cnt1++ ;
+	      } else { 
+		wts2[cnt2+1] = wts2[cnt2]+cell_weights[i] ;
+		cnt2++ ;
+	      }
 	    } ENDFORALL ;
-	    
+
 	    entitySet pdom = local_cells[MPI_rank] ;
-	    cnt = 0 ;
-	    FORALL(pdom,i) {
-	      cell_ptn[wts[cnt]/wpp] += i ;
-	      cnt++ ;
+	    cnt1 = 0 ;
+	    cnt2 = 0 ;
+	    FORALL(dom,i) {
+	      if(cell_weights[i] <= 1) {
+		cell_ptn[wts1[cnt1]/wpp1] += i ;
+		cnt1++ ;
+	      } else {
+		cell_ptn[wts2[cnt2]/wpp2] += i ;
+		cnt2++ ;
+	      }
 	    } ENDFORALL ;
 	  }
 	  
@@ -2570,14 +3048,18 @@ namespace Loci {
     // if(MPI_rank==0)std::cout<<" using setupFVMGridWithWeight" << std::endl;
     bool orig_load_cell_weights = load_cell_weights;
     string orig_cell_weight_file = cell_weight_file;
-
+    storeRepP orig_cell_weight_store = cell_weight_store ;
     cell_weight_store = 0;
     load_cell_weights = true;
     cell_weight_file = weightfile;
     
-    if(!readFVMGrid(facts,filename))
+    if(!readFVMGrid(facts,filename)) {
+      load_cell_weights = orig_load_cell_weights;
+      cell_weight_file = orig_cell_weight_file;  
+      cell_weight_store = orig_cell_weight_store ;
       return false ;
-    
+    }
+    cell_weight_store = 0;
     memSpace("before create_face_info") ;
     create_face_info(facts) ;
     
@@ -2586,6 +3068,7 @@ namespace Loci {
     
     load_cell_weights = orig_load_cell_weights;
     cell_weight_file = orig_cell_weight_file;  
+    cell_weight_store = orig_cell_weight_store ;
     return true ;
   }
 
@@ -2595,14 +3078,19 @@ namespace Loci {
     //if(MPI_rank==0)std::cout<<" using setupFVMGridWithWeightInStore" << std::endl;
     bool orig_load_cell_weights = load_cell_weights;
     string orig_cell_weight_file = cell_weight_file;
+    storeRepP orig_cell_weight_store = cell_weight_store ;
+
     cell_weight_file = "";
     cell_weight_store = cellwt;
 
-    load_cell_weights = true;
+    load_cell_weights = false;
     
-    
-    if(!readFVMGrid(facts,filename))
+    if(!readFVMGrid(facts,filename)) {
+      load_cell_weights = orig_load_cell_weights;
+      cell_weight_file = orig_cell_weight_file;  
+      cell_weight_store = orig_cell_weight_store ;
       return false ;
+    }
     
     memSpace("before create_face_info") ;
     create_face_info(facts) ;
@@ -2611,9 +3099,8 @@ namespace Loci {
     create_ghost_cells(facts) ;
 
     load_cell_weights = orig_load_cell_weights;
-    cell_weight_file = orig_cell_weight_file; 
-    cell_weight_store = 0;
-    cellwt = 0;
+    cell_weight_file = orig_cell_weight_file;  
+    cell_weight_store = orig_cell_weight_store ;
     return true ;
   }
 

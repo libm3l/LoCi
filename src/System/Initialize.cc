@@ -119,7 +119,9 @@ namespace Loci {
   MPI_Op MPI_FADD2_MAX ;
 
   int MPI_processes = 1;
-  int MPI_rank = 0 ;
+  int MPI_rank = 0 ; 
+  int MPI_processes_per_host = 1 ;
+
   bool useDebugDir = true ;
   bool useDomainKeySpaces = false ;
 
@@ -177,19 +179,23 @@ namespace Loci {
   bool collect_timings = false;
   double time_duration_to_collect_data = 0 ;
   bool use_duplicate_model = false;
-
-#ifdef LOCI_USE_METIS
   bool use_simple_partition=false;
+
+  // space filling curve partitioner
+#ifdef LOCI_USE_METIS
+  bool use_sfc_partition = false ;
 #else 
   // RSM COMMENT 20181108 setting this to true,
   // automatically disables calls to METIS decomposition
   // when we add support for ZOLTAN this will need to be 
   // REVISITED: METIS_DISABLE_NOTE
-  bool use_simple_partition=true;
+  bool use_sfc_partition=true;
 #endif /* ifndef LOCI_USE_METIS */
   bool use_orb_partition = false ;
+  
   extern int factdb_allocated_base ;
 
+  string PFS_Script ; // Parallel File System Striping Script
 
   char * model_file;
   // these flags are used to indicate additional weights
@@ -215,6 +221,28 @@ namespace Loci {
   double total_memory_usage = 0 ;
 
   extern int current_rule_id ;
+
+  size_t MPI_process_mem_avail() {
+     size_t mem = 0 ;
+     ifstream memfile("/proc/meminfo") ;
+     if(memfile.fail())
+       return mem ;
+     string key="MemAvailable:" ;
+     while(!memfile.fail() || !memfile.eof()) {
+       string type ;
+       int val ;
+       string unit ;
+       memfile >> type >> val ;
+       std::getline(memfile,unit) ;
+       if(type==key) {
+	 mem = val ;
+	 mem *= 1024 ;
+	 mem /= MPI_processes_per_host ;
+	 return mem ;
+       }
+     }
+     return mem ;
+  }
 
   void disableDebugDir() {useDebugDir = false ;}
 
@@ -402,6 +430,19 @@ namespace Loci {
     MPI_Comm_size(MPI_COMM_WORLD, &MPI_processes) ;
     MPI_Comm_rank(MPI_COMM_WORLD, &MPI_rank) ;
 
+    // Find number of mpi processes per host
+    {
+      long hid = gethostid() ;
+      vector<long> host_list(MPI_processes) ;
+      MPI_Allgather(&hid,1,MPI_LONG,&host_list[0],1,MPI_LONG,MPI_COMM_WORLD) ;
+      int cnt = 0 ;
+      for(int i=0;i<MPI_processes;++i)
+	if(hid == host_list[i])
+	  cnt++ ;
+      MPI_processes_per_host = cnt ;
+      debugout << "mpi processes per host = " << cnt << endl ;
+    }
+
     int sprng_seed = 985456376 ;
     int sprng_gtype = SPRNG_LFG ; // sprng generator type
     // LFG   - 0 - Additive Lagged Fibonaci Generator
@@ -410,10 +451,15 @@ namespace Loci {
     // CMRG  - 3 - Combined Multiple Recursive Generator
     // MLFG  - 4 - Multiplicative Lagged Fibonacci Generator
 
+    char *p = 0 ;
+    if((p=getenv("LOCI_PFS_SCRIPT")) != 0) {
+      PFS_Script = string(p) ;
+    } else {
+      PFS_Script = string ("") ;
+    }
     try {
 
       ostringstream oss ;
-
       char *p = 0 ;
       if((p = getenv("LOCI_MODULE_PATH")) == 0)
         p = getenv("LD_LIBRARY_PATH") ;
@@ -509,6 +555,9 @@ namespace Loci {
           i++ ;
         } else if(!strcmp((*argv)[i],"--orb_partition")) {
           use_orb_partition = true ; // partition mesh using ORB method
+          i++ ;
+        } else if(!strcmp((*argv)[i],"--sfc_partition")) {
+          use_sfc_partition = true ; // partition mesh using SFC method
           i++ ;
         } else if(!strcmp((*argv)[i],"--dmm")) {
           use_dynamic_memory = true ; // use dynamic memory management

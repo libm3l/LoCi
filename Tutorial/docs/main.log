@@ -1,29 +1,30 @@
-This is pdfTeX, Version 3.14159265-2.6-1.40.20 (TeX Live 2019) (preloaded format=latex 2019.6.11)  26 AUG 2020 20:11
+This is pdfTeX, Version 3.14159265-2.6-1.40.18 (TeX Live 2017/Debian) (preloaded format=latex 2018.10.12)  28 MAY 2021 16:09
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
 **main
 (./main.tex
-LaTeX2e <2018-12-01>
-(/opt/texlive/2019/texmf-dist/tex/latex/base/book.cls
-Document Class: book 2018/09/03 v1.4i Standard LaTeX document class
-(/opt/texlive/2019/texmf-dist/tex/latex/base/bk10.clo
-File: bk10.clo 2018/09/03 v1.4i Standard LaTeX file (size option)
+LaTeX2e <2017-04-15>
+Babel <3.18> and hyphenation patterns for 84 language(s) loaded.
+(/usr/share/texlive/texmf-dist/tex/latex/base/book.cls
+Document Class: book 2014/09/29 v1.4h Standard LaTeX document class
+(/usr/share/texlive/texmf-dist/tex/latex/base/bk10.clo
+File: bk10.clo 2014/09/29 v1.4h Standard LaTeX file (size option)
 )
-\c@part=\count80
-\c@chapter=\count81
-\c@section=\count82
-\c@subsection=\count83
-\c@subsubsection=\count84
-\c@paragraph=\count85
-\c@subparagraph=\count86
-\c@figure=\count87
-\c@table=\count88
+\c@part=\count79
+\c@chapter=\count80
+\c@section=\count81
+\c@subsection=\count82
+\c@subsubsection=\count83
+\c@paragraph=\count84
+\c@subparagraph=\count85
+\c@figure=\count86
+\c@table=\count87
 \abovecaptionskip=\skip41
 \belowcaptionskip=\skip42
 \bibindent=\dimen102
 )
-(/opt/texlive/2019/texmf-dist/tex/generic/epsf/epsf.sty
+(/usr/share/texlive/texmf-dist/tex/generic/epsf/epsf.sty
 This is `epsf.tex' v2.7.4 <14 February 2011>
 \epsffilein=\read1
 \epsfframemargin=\dimen103
@@ -34,50 +35,50 @@ This is `epsf.tex' v2.7.4 <14 February 2011>
 \epsfxsize=\dimen108
 \epsfysize=\dimen109
 \pspoints=\dimen110
-) (/opt/texlive/2019/texmf-dist/tex/latex/amsmath/amsmath.sty
-Package: amsmath 2018/12/01 v2.17b AMS math features
+) (/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsmath.sty
+Package: amsmath 2017/09/02 v2.17a AMS math features
 \@mathmargin=\skip43
 
 For additional information on amsmath, use the `?' option.
-(/opt/texlive/2019/texmf-dist/tex/latex/amsmath/amstext.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amstext.sty
 Package: amstext 2000/06/29 v2.01 AMS text
 
-(/opt/texlive/2019/texmf-dist/tex/latex/amsmath/amsgen.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsgen.sty
 File: amsgen.sty 1999/11/30 v2.0 generic functions
 \@emptytoks=\toks14
 \ex@=\dimen111
 ))
-(/opt/texlive/2019/texmf-dist/tex/latex/amsmath/amsbsy.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsbsy.sty
 Package: amsbsy 1999/11/29 v1.2d Bold Symbols
 \pmbraise@=\dimen112
 )
-(/opt/texlive/2019/texmf-dist/tex/latex/amsmath/amsopn.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsmath/amsopn.sty
 Package: amsopn 2016/03/08 v2.02 operator names
 )
-\inf@bad=\count89
-LaTeX Info: Redefining \frac on input line 223.
-\uproot@=\count90
-\leftroot@=\count91
-LaTeX Info: Redefining \overline on input line 385.
-\classnum@=\count92
-\DOTSCASE@=\count93
-LaTeX Info: Redefining \ldots on input line 482.
-LaTeX Info: Redefining \dots on input line 485.
-LaTeX Info: Redefining \cdots on input line 606.
-\Mathstrutbox@=\box27
-\strutbox@=\box28
+\inf@bad=\count88
+LaTeX Info: Redefining \frac on input line 213.
+\uproot@=\count89
+\leftroot@=\count90
+LaTeX Info: Redefining \overline on input line 375.
+\classnum@=\count91
+\DOTSCASE@=\count92
+LaTeX Info: Redefining \ldots on input line 472.
+LaTeX Info: Redefining \dots on input line 475.
+LaTeX Info: Redefining \cdots on input line 596.
+\Mathstrutbox@=\box26
+\strutbox@=\box27
 \big@size=\dimen113
-LaTeX Font Info:    Redeclaring font encoding OML on input line 729.
-LaTeX Font Info:    Redeclaring font encoding OMS on input line 730.
-\macc@depth=\count94
-\c@MaxMatrixCols=\count95
+LaTeX Font Info:    Redeclaring font encoding OML on input line 712.
+LaTeX Font Info:    Redeclaring font encoding OMS on input line 713.
+\macc@depth=\count93
+\c@MaxMatrixCols=\count94
 \dotsspace@=\muskip10
-\c@parentequation=\count96
-\dspbrk@lvl=\count97
+\c@parentequation=\count95
+\dspbrk@lvl=\count96
 \tag@help=\toks15
-\row@=\count98
-\column@=\count99
-\maxfields@=\count100
+\row@=\count97
+\column@=\count98
+\maxfields@=\count99
 \andhelp@=\toks16
 \eqnshift@=\dimen114
 \alignsep@=\dimen115
@@ -89,50 +90,50 @@ LaTeX Font Info:    Redeclaring font encoding OMS on input line 730.
 \multlinegap=\skip44
 \multlinetaggap=\skip45
 \mathdisplay@stack=\toks18
-LaTeX Info: Redefining \[ on input line 2844.
-LaTeX Info: Redefining \] on input line 2845.
+LaTeX Info: Redefining \[ on input line 2817.
+LaTeX Info: Redefining \] on input line 2818.
 )
-(/opt/texlive/2019/texmf-dist/tex/latex/amsfonts/amssymb.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amssymb.sty
 Package: amssymb 2013/01/14 v3.01 AMS font symbols
 
-(/opt/texlive/2019/texmf-dist/tex/latex/amsfonts/amsfonts.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/amsfonts.sty
 Package: amsfonts 2013/01/14 v3.01 Basic AMSFonts support
 \symAMSa=\mathgroup4
 \symAMSb=\mathgroup5
 LaTeX Font Info:    Overwriting math alphabet `\mathfrak' in version `bold'
 (Font)                  U/euf/m/n --> U/euf/b/n on input line 106.
 ))
-(/opt/texlive/2019/texmf-dist/tex/latex/tools/theorem.sty
+(/usr/share/texlive/texmf-dist/tex/latex/tools/theorem.sty
 Package: theorem 2014/10/28 v2.2c Theorem extension package (FMi)
 \theorem@style=\toks19
 \theorem@bodyfont=\toks20
 \theorempreskipamount=\skip46
 \theorempostskipamount=\skip47
 
-(/opt/texlive/2019/texmf-dist/tex/latex/tools/thp.sty
+(/usr/share/texlive/texmf-dist/tex/latex/tools/thp.sty
 File: thp.sty 2014/10/28 v2.2c Theorem extension package (FMi)
 ))
-(/opt/texlive/2019/texmf-dist/tex/latex/amsfonts/euscript.sty
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/euscript.sty
 Package: euscript 2009/06/22 v3.00 Euler Script fonts
 LaTeX Font Info:    Overwriting math alphabet `\EuScript' in version `bold'
 (Font)                  U/eus/m/n --> U/eus/b/n on input line 33.
 )
-(/opt/texlive/2019/texmf-dist/tex/latex/tools/longtable.sty
-Package: longtable 2014/10/28 v4.11 Multi-page Table package (DPC)+ FMi change
+(/usr/share/texlive/texmf-dist/tex/latex/tools/longtable.sty
+Package: longtable 2014/10/28 v4.11 Multi-page Table package (DPC)
 \LTleft=\skip48
 \LTright=\skip49
 \LTpre=\skip50
 \LTpost=\skip51
-\LTchunksize=\count101
+\LTchunksize=\count100
 \LTcapwidth=\dimen120
-\LT@head=\box29
-\LT@firsthead=\box30
-\LT@foot=\box31
-\LT@lastfoot=\box32
-\LT@cols=\count102
-\LT@rows=\count103
-\c@LT@tables=\count104
-\c@LT@chunks=\count105
+\LT@head=\box28
+\LT@firsthead=\box29
+\LT@foot=\box30
+\LT@lastfoot=\box31
+\LT@cols=\count101
+\LT@rows=\count102
+\c@LT@tables=\count103
+\c@LT@chunks=\count104
 \LT@p@ftn=\toks21
 )
 
@@ -157,12 +158,12 @@ LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 24.
 LaTeX Font Info:    ... okay on input line 24.
 LaTeX Font Info:    Try loading font information for U+msa on input line 27.
 
-(/opt/texlive/2019/texmf-dist/tex/latex/amsfonts/umsa.fd
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
 LaTeX Font Info:    Try loading font information for U+msb on input line 27.
 
-(/opt/texlive/2019/texmf-dist/tex/latex/amsfonts/umsb.fd
+(/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
 
@@ -316,7 +317,7 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 [46] [47] [48] [49]
 LaTeX Font Info:    Try loading font information for OML+cmr on input line 2114
 .
- (/opt/texlive/2019/texmf-dist/tex/latex/base/omlcmr.fd
+ (/usr/share/texlive/texmf-dist/tex/latex/base/omlcmr.fd
 File: omlcmr.fd 2014/09/29 v2.5h Standard LaTeX font definitions
 )
 LaTeX Font Info:    Font shape `OML/cmr/m/n' in size <10> not available
@@ -379,7 +380,7 @@ Appendix C.
 ] [68] [69] [70]
 LaTeX Font Info:    Try loading font information for OMS+cmr on input line 212.
 
- (/opt/texlive/2019/texmf-dist/tex/latex/base/omscmr.fd
+ (/usr/share/texlive/texmf-dist/tex/latex/base/omscmr.fd
 File: omscmr.fd 2014/09/29 v2.5h Standard LaTeX font definitions
 )
 LaTeX Font Info:    Font shape `OMS/cmr/m/n' in size <10> not available
@@ -466,12 +467,12 @@ LaTeX Font Warning: Some font shapes were not available, defaults substituted.
 
  ) 
 Here is how much of TeX's memory you used:
- 1505 strings out of 492610
- 17443 string characters out of 6131918
- 91005 words of memory out of 5000000
- 5377 multiletter control sequences out of 15000+600000
+ 1507 strings out of 492983
+ 17502 string characters out of 6134921
+ 84387 words of memory out of 5000000
+ 5024 multiletter control sequences out of 15000+600000
  14608 words of font info for 56 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 27i,9n,27p,278b,323s stack positions out of 5000i,500n,10000p,200000b,80000s
+ 27i,9n,26p,278b,323s stack positions out of 5000i,500n,10000p,200000b,80000s
 
 Output written on main.dvi (83 pages, 229612 bytes).

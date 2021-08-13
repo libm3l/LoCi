@@ -34,8 +34,8 @@ namespace Loci {
     ccenter[0] = realToFloat(pnt.x) ;
     ccenter[1] = realToFloat(pnt.y) ;
     ccenter[2] = realToFloat(pnt.z) ;
-    double delta = realToDouble(deltai) ;
-    double rmin = 2.*delta*delta ; // Note rmin is radius squared.
+    double delta = 1.4142*realToDouble(deltai) ;
+    double rmin = delta*delta ; // Note rmin is radius squared.
     double rmin_ref = rmin ;
     
     int id = kd.find_closest(ccenter,rmin) ;
@@ -126,8 +126,8 @@ namespace Loci {
     ccenter[1] = realToFloat(pnt.y) ;
     ccenter[2] = realToFloat(pnt.z) ;
 
-    double delta = realToDouble(deltai) ;
-    double rmin = 2.*delta*delta ; // Note rmin is radius squared.
+    double delta = 1.4142*realToDouble(deltai) ;
+    double rmin = delta*delta ; // Note rmin is radius squared.
     double rmin_ref = rmin ;
     
     int id = kd.find_closest(ccenter,rmin) ;
@@ -744,7 +744,7 @@ namespace Loci {
     
     std::sort(access.begin(),access.end()) ;
 
-    WARN(access[0] < 0) ;
+    WARN(access.size()>0 && access[0] < 0) ;
 
     const int p = MPI_processes ;
     // Now communicate the accessed info
