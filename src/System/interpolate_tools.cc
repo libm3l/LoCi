@@ -44,13 +44,14 @@ namespace Loci {
       // If no points in stencil radius, return closest point
       vector<int> n ;
       id = kd.find_closest(ccenter) ;
-      if(id >=0)
+      if(id >=0 && id !=std::numeric_limits<int>::max())
         n.push_back(id) ;
       return n ;
     }
     if(rmin <= 1e-30) {
       vector<int> n ;
-      n.push_back(id) ;
+      if(id != std::numeric_limits<int>::max())
+	n.push_back(id) ;
       return n ;
     }
 
@@ -65,24 +66,32 @@ namespace Loci {
 
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[0] = id;
 
     box.maxc[0] = ccenter[0] ;
     box.minc[0] = ccenter[0]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[1] = id;
 
     box.maxc[1] = ccenter[1] ;
     box.minc[1] = ccenter[1]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[2] = id;
 
     box.minc[0] = ccenter[0] ;
     box.maxc[0] = ccenter[0]+delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[3] = id;
 
     // Now gather negative z quadrants
@@ -94,24 +103,32 @@ namespace Loci {
     box.minc[2] = ccenter[2]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[4] = id;
 
     box.maxc[0] = ccenter[0] ;
     box.minc[0] = ccenter[0]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[5] = id ;
 
     box.maxc[1] = ccenter[1] ;
     box.minc[1] = ccenter[1]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[6] = id ;
 
     box.minc[0] = ccenter[0] ;
     box.maxc[0] = ccenter[0]+delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[7] = id ;
 
     return neighbors ;
@@ -132,17 +149,18 @@ namespace Loci {
     
     int id = kd.find_closest(ccenter,rmin) ;
 
-    if(id < 0) {
+    if(id < 0 ) {
       // If no points in stencil radius, return closest point
       vector<int> n ;
       id = kd.find_closest(ccenter) ;
-      if(id >=0)
+      if(id >=0 && id != std::numeric_limits<int>::max())
         n.push_back(id) ;
       return n ;
     }
     if(rmin <= 1e-30) {
       vector<int> n ;
-      n.push_back(id) ;
+      if(id != std::numeric_limits<int>::max())
+	n.push_back(id) ;
       return n ;
     }
 
@@ -157,24 +175,32 @@ namespace Loci {
 
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[0] = id;
 
     box.maxc[0] = ccenter[0] ;
     box.minc[0] = ccenter[0]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[1] = id;
 
     box.maxc[1] = ccenter[1] ;
     box.minc[1] = ccenter[1]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[2] = id;
 
     box.minc[0] = ccenter[0] ;
     box.maxc[0] = ccenter[0]+delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[3] = id;
 
     // Now gather negative z quadrants
@@ -186,24 +212,32 @@ namespace Loci {
     box.minc[2] = ccenter[2]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[4] = id;
 
     box.maxc[0] = ccenter[0] ;
     box.minc[0] = ccenter[0]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[5] = id ;
 
     box.maxc[1] = ccenter[1] ;
     box.minc[1] = ccenter[1]-delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[6] = id ;
 
     box.minc[0] = ccenter[0] ;
     box.maxc[0] = ccenter[0]+delta ;
     rmin = rmin_ref ;
     id = kd.find_closest_box(ccenter,box,rmin) ;
+    if(id == std::numeric_limits<int>::max())
+      id = -1 ;
     neighbors[7] = id ;
 
     return neighbors ;
@@ -946,7 +980,71 @@ namespace Loci {
     MEMORY_PROFILE(sendStencilDataStartEnd3dv) ;
   }
 
-    // Note, this needs to be made more general.
+  void sendStencilData(storeVec<MFADd> &stencilData,
+                       const_storeVec<MFADd> &sourceData,
+                       const vector<int> &send_info,
+                       const vector<int> &req_sizes_in,
+                       const vector<int> &snd_sizes_in) {
+    MEMORY_PROFILE(sendStencilDataStartv) ;
+
+#ifdef VERBOSE
+    entitySet dom = sourceData.domain() ;
+#endif
+    int vec_size = sourceData.vecSize() ;
+    vector<MFADd> databuf(send_info.size()*vec_size) ;
+    for(size_t i = 0;i<send_info.size();++i) {
+      int id = send_info[i] ;
+#ifdef VERBOSE
+      if(!dom.inSet(id)) {
+        debugout << "id=" <<id << " out of domain " << dom << endl ;
+        id = dom.Min() ;
+      }
+
+#endif
+      for(int j=0;j<vec_size;++j) {
+        databuf[i*vec_size+j] = sourceData[id][j] ;
+      }
+    }
+
+    int p = MPI_processes ;
+    vector<int> req_sizes(p),snd_sizes(p) ;
+    for(int i=0;i<p;++i) {
+      req_sizes[i] = req_sizes_in[i]*vec_size ;
+      snd_sizes[i] = snd_sizes_in[i]*vec_size ;
+    }
+
+    vector<int> sdispls(p) ;
+    sdispls[0] = 0 ;
+    for(int i=1;i<p;++i)
+      sdispls[i] = sdispls[i-1]+req_sizes[i-1] ;
+
+    vector<int> rdispls(p) ;
+    rdispls[0] = 0 ;
+    for(int i=1;i<p;++i) {
+      rdispls[i] = rdispls[i-1]+snd_sizes[i-1] ;
+    }
+
+    int loc_size = 0 ;
+    for(int i=0;i<p;++i)
+      loc_size += req_sizes_in[i] ;
+
+    stencilData.allocate(entitySet(interval(0,loc_size-1))) ;
+    stencilData.setVecSize(vec_size) ;
+
+    MEMORY_PROFILE(sendStencilDataStartall2all) ;
+    for(int i=0;i<p;++i) {
+      snd_sizes[i] *=2 ;
+      rdispls[i] *= 2 ;
+      req_sizes[i] *= 2 ;
+      sdispls[i] *=2 ;
+    }
+    MPI_Alltoallv(&databuf[0],&snd_sizes[0],&rdispls[0],MPI_MFADD,
+                  &stencilData[0][0],&req_sizes[0],&sdispls[0],MPI_MFADD,
+                  MPI_COMM_WORLD) ;
+    MEMORY_PROFILE(sendStencilDataStartEnd3dv) ;
+  }
+
+  // Note, this needs to be made more general.
   void sendStencilData(storeVec<FAD2d> &stencilData,
                        const_storeVec<FAD2d> &sourceData,
                        const vector<int> &send_info,

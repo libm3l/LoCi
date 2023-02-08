@@ -69,7 +69,7 @@ namespace Loci{
   //assume the union of nodes on all processors will be either all the nodes,
   //all the faces, or all the cells. i.e., one interval in file numbering
   storeRepP get_node_remap(fact_db &facts,entitySet nodes) {
-
+    REPORTMEM() ;
     if(MPI_processes == 1) {
       int minNode = nodes.Min() ;
       
@@ -78,6 +78,7 @@ namespace Loci{
       FORALL(nodes,nd) {
         nm[nd] = nd - minNode + 1 ;
       } ENDFORALL ;
+      REPORTMEM() ;
       return nm.Rep() ;
     }
     
@@ -103,6 +104,7 @@ namespace Loci{
     FORALL(nodes,i) {
       newnum[i] = g2f[l2g[i]]-minNode+1 ;
     } ENDFORALL ;
+    REPORTMEM() ;
     return newnum.Rep() ;
   }
 
@@ -123,6 +125,7 @@ namespace Loci{
       } ENDFORALL ;
       return nm.Rep() ;
     }
+    REPORTMEM() ;
 #ifdef VERBOSE
     stopWatch s ;
     s.start() ;
@@ -155,8 +158,8 @@ namespace Loci{
     if(color==0) {
       MPI_Comm_free(&groupcomm) ;
 #ifdef VERBOSE
-    debugout << "time to split comm and return = " << s.stop() << endl ;
-    s.start() ;
+      debugout << "time to split comm and return = " << s.stop() << endl ;
+      s.start() ;
 #endif
       Map newnum ;
       return newnum.Rep() ;
@@ -269,6 +272,7 @@ namespace Loci{
 #ifdef VERBOSE
     debugout << "time to form map = " << s.stop() << endl ;
 #endif
+    REPORTMEM() ;
     return newnum.Rep() ;
   }
   
@@ -494,6 +498,7 @@ namespace Loci{
                                  storeRepP posRep,
                                  entitySet localCells,
                                  fact_db &facts) {
+    REPORTMEM() ;
     const_multiMap upper(upperRep),lower(lowerRep),
       boundary_map(boundary_mapRep),face2node(face2nodeRep) ;
     const_Map ref(refRep) ;
@@ -677,8 +682,8 @@ namespace Loci{
 
     // write grid topology file
     hid_t file_id = 0, group_id = 0 ;
-    if(MPI_rank == 0) {
-      file_id = H5Fcreate(filename,H5F_ACC_TRUNC,H5P_DEFAULT,H5P_DEFAULT) ;
+    file_id=writeVOGOpen(filename) ;
+    if(use_parallel_io ||MPI_rank == 0 ) {
 #ifdef H5_USE_16_API
       group_id = H5Gcreate(file_id,"elements",0) ;
 #else
@@ -686,6 +691,7 @@ namespace Loci{
 #endif
     }
 
+   
     writeUnorderedVector(group_id, "tetrahedra",tets) ;
     writeUnorderedVector(group_id, "tetrahedra_ids",tets_ids) ;
     
@@ -694,16 +700,17 @@ namespace Loci{
     
     writeUnorderedVector(group_id, "prism",prsm) ;
     writeUnorderedVector(group_id, "prism_ids",prsm_ids) ;
-    
+      
     writeUnorderedVector(group_id, "pyramid",pyrm) ;
     writeUnorderedVector(group_id, "pyramid_ids",pyrm_ids) ;
-    
+      
     writeUnorderedVector(group_id, "GeneralCellNfaces",generalCellNfaces) ;
     writeUnorderedVector(group_id, "GeneralCellNsides",generalCellNsides) ;
     writeUnorderedVector(group_id, "GeneralCellNodes", generalCellNodes) ;
     writeUnorderedVector(group_id, "GeneralCell_ids", generalCell_ids) ;
+     
     
-    if(MPI_rank == 0) {
+    if(use_parallel_io || MPI_rank == 0) {
       H5Gclose(group_id) ;
 #ifdef H5_USE_16_API
       group_id = H5Gcreate(file_id,"boundaries",0) ;
@@ -779,7 +786,7 @@ namespace Loci{
     for(size_t i=0;i<bnamelist.size();++i) {
       hid_t bc_id = 0 ;
       string current_bc = bnamelist[i] ;
-      if(MPI_rank==0) {
+      if(use_parallel_io || MPI_rank==0) {
 #ifdef H5_USE_16_API
         bc_id = H5Gcreate(group_id,current_bc.c_str(),0) ;
 #else
@@ -846,30 +853,29 @@ namespace Loci{
           ng++ ;
         }
       } ENDFORALL ;
-          
+
+     
       writeUnorderedVector(bc_id,"triangles",Trias) ;
       writeUnorderedVector(bc_id,"triangles_id",tria_ids) ;
-
+	
       writeUnorderedVector(bc_id,"quads",Quads) ;
       writeUnorderedVector(bc_id,"quads_id",quad_ids) ;
-
+	
       writeUnorderedVector(bc_id,"nside_sizes",nsizes) ;
       writeUnorderedVector(bc_id,"nside_nodes",nsidenodes) ;
       writeUnorderedVector(bc_id,"nside_id",genc_ids) ;
-      
-      if(MPI_rank == 0) {
+       
+      if(use_parallel_io || MPI_rank == 0) {
         H5Gclose(bc_id) ;
       }
       
     }
       
-    if(MPI_rank == 0) {
+    if(use_parallel_io || MPI_rank == 0) {
       H5Gclose(group_id) ;
       H5Fclose(file_id) ;
     } 
-
-
-
+    REPORTMEM() ;
   }
   
   //collect all boundary names
@@ -940,15 +946,10 @@ namespace Loci{
     hid_t file_id = 0;
     if(MPI_rank == 0) {
       get_bc_directory(bc_name);
-      string dirname = "output/"+bc_name+"/";
-      string filename = dirname+file_name;
-      file_id = H5Fcreate(filename.c_str(),H5F_ACC_TRUNC,H5P_DEFAULT,H5P_DEFAULT) ;
-    
-      if(file_id == 0){
-        cerr << "ERROR: can not file " << filename << endl ;
-        Loci::Abort() ;
-      }
     }
+    string dirname = "output/"+bc_name+"/";
+    string filename = dirname+file_name;
+    file_id=writeVOGOpen(filename.c_str()) ;
     return file_id;
   }
   
@@ -1009,6 +1010,7 @@ namespace Loci{
                          storeRepP face2nodeRep,
                          entitySet bfaces,//boundary faces define this surface 
                          fact_db &facts ){ 
+      REPORTMEM() ;
 #ifdef VERBOSE
     debugout << "writing out boundary surface topology" << endl ;
     stopWatch s ;
@@ -1091,19 +1093,23 @@ namespace Loci{
     debugout << "time to generate topology datasets = " << s.stop() << endl ;
     s.start() ;
 #endif
+
+    
     //write out vectors
     writeUnorderedVector(file_id,"triangles",Trias) ;
     writeUnorderedVector(file_id,"triangles_ord",tria_ids) ;
     writeUnorderedVector(file_id,"quads",Quads) ;
     writeUnorderedVector(file_id,"quads_ord",quad_ids) ;
-    
+      
     writeUnorderedVector(file_id,"nside_sizes",nsizes) ;
     writeUnorderedVector(file_id,"nside_nodes",nsidenodes) ;
     writeUnorderedVector(file_id,"nside_ord",genc_ids) ;
+ 
 #ifdef VERBOSE
     debugout << "time to write unordered vectors = " << s.stop() << endl ;
     debugout << "finished writing boundary topology" << endl ;
 #endif
+      REPORTMEM() ;
   }
       
   //this function find the index of an inner edge.
@@ -1322,6 +1328,7 @@ namespace Loci{
                        storeRepP valRep,
                        entitySet localCells,//all geom_cells
                        fact_db &facts) {
+    REPORTMEM() ;
     
     const_multiMap upper(upperRep),lower(lowerRep),
       boundary_map(boundary_mapRep),face2node(face2nodeRep), face2edge(face2edgeRep) ;
@@ -1381,6 +1388,7 @@ namespace Loci{
     }ENDFORALL;
     
    
+    REPORTMEM() ;
     return CutPlane(edgesWeight.Rep(),
                     new_faceLoops);
                      
@@ -1391,6 +1399,7 @@ namespace Loci{
   void writeCutPlaneTopo(hid_t bc_id,
                          const CutPlane& cp,
                          fact_db &facts){ 
+      REPORTMEM() ;
 #ifdef VERBOSE
     debugout << "write cutPlaneTopology" << endl ;
     stopWatch s ;
@@ -1411,6 +1420,7 @@ namespace Loci{
       nsizes[i] = cp.faceLoops[i].size();
     }
     
+    
     writeUnorderedVector(bc_id,"nside_sizes",nsizes) ;
     
     //write out face nodes
@@ -1423,10 +1433,14 @@ namespace Loci{
         }
       }
     }
+    
+   
     writeUnorderedVector(bc_id,"nside_nodes",nsidenodes) ;
+
 #ifdef VERBOSE
     debugout << "time to write cut plane topology=" << s.stop() << endl ;
 #endif
+      REPORTMEM() ;
   }
 
   namespace {
@@ -2068,6 +2082,7 @@ namespace Loci{
   }
 
   void create_cell_stencil_full(fact_db &facts) {
+    REPORTMEM() ;
     using std::vector ;
     using std::pair ;
     Map cl,cr ;
@@ -2120,9 +2135,11 @@ namespace Loci{
     distributed_inverseMap(cellStencil,c2c,geom_cells,geom_cells,ptn) ;
     // Put in fact database
     facts.create_fact("cellStencil",cellStencil) ;
+    REPORTMEM() ;
   }
   
   void create_cell_stencil(fact_db & facts) {
+    REPORTMEM() ;
     using std::vector ;
     using std::pair ;
     Map cl,cr ;
@@ -2356,10 +2373,12 @@ namespace Loci{
     } ENDFORALL ;
     // Put in fact database
     facts.create_fact("cellStencil",cellStencilFiltered) ;
+    REPORTMEM() ;
   }
 
   
   void createLowerUpper(fact_db &facts) {
+    REPORTMEM() ;
     constraint geom_cells,interior_faces,boundary_faces ;
     constraint faces = facts.get_variable("faces") ;
     geom_cells = facts.get_variable("geom_cells") ;
@@ -2414,6 +2433,7 @@ namespace Loci{
       if(*gradStencil == "full")
 	create_cell_stencil_full(facts) ;
     }
+    REPORTMEM() ;
 
   }
 
@@ -2889,74 +2909,75 @@ namespace Loci{
     // this function transposes the passed in vector<entitySet>
     // by an all to all personalized communication
     // UNUSED
-//     vector<entitySet>
-//     transpose_vector_entitySet(const vector<entitySet>& in) {
-//       // first compute the send count and displacement
-//       int* send_counts = new int[MPI_processes] ;
-//       for(int i=0;i<MPI_processes;++i)
-//         send_counts[i] = in[i].size() ;
-//       int* send_displs = new int[MPI_processes] ;
-//       send_displs[0] = 0 ;
-//       for(int i=1;i<MPI_processes;++i)
-//         send_displs[i] = send_displs[i-1] + send_counts[i-1] ;
-//       // then communicate this get the recv info.
-//       int* recv_counts = new int[MPI_processes] ;
-//       MPI_Alltoall(send_counts, 1, MPI_INT,
-//                    recv_counts, 1, MPI_INT, MPI_COMM_WORLD) ;
-//       int* recv_displs = new int[MPI_processes] ;
-//       recv_displs[0] = 0 ;
-//       for(int i=1;i<MPI_processes;++i)
-//         recv_displs[i] = recv_displs[i-1] + recv_counts[i-1] ;
-//       // all info. gathered, ready to do MPI_Alltoallv
-//       // first pack data into a raw buffer.
-//       int buf_size = 0 ;
-//       for(int i=0;i<MPI_processes;++i)
-//         buf_size += send_counts[i] ;
-//       int* send_buf = new int[buf_size] ;
-//       int buf_idx = 0 ;
-//       for(int i=0;i<MPI_processes;++i) {
-//         const entitySet& eset = in[i] ;
-//         for(entitySet::const_iterator ei=eset.begin();
-//             ei!=eset.end();++ei,++buf_idx)
-//           send_buf[buf_idx] = *ei ;
-//       }
-//       // allocate receive buffer
-//       int recv_size = 0 ;
-//       for(int i=0;i<MPI_processes;++i)
-//         recv_size += recv_counts[i] ;
-//       int* recv_buf = new int[recv_size] ;
-//       // communicate
-//       MPI_Alltoallv(send_buf, send_counts,
-//                     send_displs, MPI_INT,
-//                     recv_buf, recv_counts,
-//                     recv_displs, MPI_INT, MPI_COMM_WORLD) ;
-//       delete[] send_counts ;
-//       delete[] send_displs ;
-//       delete[] recv_counts ;
-//       delete[] send_buf ;
-//       // unpack recv buffer into a vector of entitySet
-//       vector<entitySet> out(MPI_processes) ;    
-//       int k = 0 ;
-//       for(int i=0;i<MPI_processes;++i) {
-//         int limit ;
-//         if(i == MPI_processes-1)
-//           limit = recv_size ;
-//         else
-//           limit = recv_displs[i+1] ;
-//         for(;k<limit;++k)
-//           out[i] += recv_buf[k] ;
-//       }
-//       delete[] recv_displs ;
-//       delete[] recv_buf ;
+    //     vector<entitySet>
+    //     transpose_vector_entitySet(const vector<entitySet>& in) {
+    //       // first compute the send count and displacement
+    //       int* send_counts = new int[MPI_processes] ;
+    //       for(int i=0;i<MPI_processes;++i)
+    //         send_counts[i] = in[i].size() ;
+    //       int* send_displs = new int[MPI_processes] ;
+    //       send_displs[0] = 0 ;
+    //       for(int i=1;i<MPI_processes;++i)
+    //         send_displs[i] = send_displs[i-1] + send_counts[i-1] ;
+    //       // then communicate this get the recv info.
+    //       int* recv_counts = new int[MPI_processes] ;
+    //       MPI_Alltoall(send_counts, 1, MPI_INT,
+    //                    recv_counts, 1, MPI_INT, MPI_COMM_WORLD) ;
+    //       int* recv_displs = new int[MPI_processes] ;
+    //       recv_displs[0] = 0 ;
+    //       for(int i=1;i<MPI_processes;++i)
+    //         recv_displs[i] = recv_displs[i-1] + recv_counts[i-1] ;
+    //       // all info. gathered, ready to do MPI_Alltoallv
+    //       // first pack data into a raw buffer.
+    //       int buf_size = 0 ;
+    //       for(int i=0;i<MPI_processes;++i)
+    //         buf_size += send_counts[i] ;
+    //       int* send_buf = new int[buf_size] ;
+    //       int buf_idx = 0 ;
+    //       for(int i=0;i<MPI_processes;++i) {
+    //         const entitySet& eset = in[i] ;
+    //         for(entitySet::const_iterator ei=eset.begin();
+    //             ei!=eset.end();++ei,++buf_idx)
+    //           send_buf[buf_idx] = *ei ;
+    //       }
+    //       // allocate receive buffer
+    //       int recv_size = 0 ;
+    //       for(int i=0;i<MPI_processes;++i)
+    //         recv_size += recv_counts[i] ;
+    //       int* recv_buf = new int[recv_size] ;
+    //       // communicate
+    //       MPI_Alltoallv(send_buf, send_counts,
+    //                     send_displs, MPI_INT,
+    //                     recv_buf, recv_counts,
+    //                     recv_displs, MPI_INT, MPI_COMM_WORLD) ;
+    //       delete[] send_counts ;
+    //       delete[] send_displs ;
+    //       delete[] recv_counts ;
+    //       delete[] send_buf ;
+    //       // unpack recv buffer into a vector of entitySet
+    //       vector<entitySet> out(MPI_processes) ;    
+    //       int k = 0 ;
+    //       for(int i=0;i<MPI_processes;++i) {
+    //         int limit ;
+    //         if(i == MPI_processes-1)
+    //           limit = recv_size ;
+    //         else
+    //           limit = recv_displs[i+1] ;
+    //         for(;k<limit;++k)
+    //           out[i] += recv_buf[k] ;
+    //       }
+    //       delete[] recv_displs ;
+    //       delete[] recv_buf ;
 
-//       return out ;
-//     }
-//     // end of unnamed namespace
+    //       return out ;
+    //     }
+    //     // end of unnamed namespace
   }
   
  
   void
   createEdgesPar(fact_db &facts) {
+    REPORTMEM() ;
     multiMap face2node ;
     face2node = facts.get_variable("face2node") ;
     entitySet faces = face2node.domain() ;
@@ -3449,10 +3470,11 @@ namespace Loci{
     edge3.Rep()->setDomainKeySpace(ek) ;
     facts.create_fact("edge2node",edge3) ;  
     
+    REPORTMEM() ;
   } // end of createEdgesPar
 
   void setupPosAutoDiff(fact_db &facts) {
-#ifdef USE_AUTODIFF
+#if defined(USE_AUTODIFF) || defined(MULTIFAD)
     
     store<vector3d<Loci::real_t> > pout ;
     {
@@ -3473,6 +3495,7 @@ namespace Loci{
 
 
   void setupOverset(fact_db &facts) {
+    REPORTMEM() ;
     using namespace Loci ;
     using std::map ;
     storeRepP sp = facts.get_variable("componentGeometry") ;
@@ -3616,11 +3639,12 @@ namespace Loci{
     }
 
     facts.create_fact("node2surf",min_node2surf) ;
+    REPORTMEM() ;
   }    
 
   
   void setupPosAutoDiff(fact_db &facts, std::string filename) {
-#ifdef USE_AUTODIFF
+#if defined(USE_AUTODIFF) || defined(MULTIFAD)
     setupPosAutoDiff(facts) ;
 #endif
   }

@@ -470,7 +470,7 @@ bool readVolBC(int fi,//file id, i.e., block_id
 
   //switch f2n to index in pos
   for(int i = f2n_start; i < f2n_end; i++){
-    for(unsigned int j = 0; j <f2n[i].size(); j++){
+    for(size_t j = 0; j <f2n[i].size(); j++){
       f2n[i][j] = used[f2n[i][j]]-1;//start with 0
     }
   }
@@ -794,12 +794,12 @@ void inverseF2N( const vector<vector<int> >& face2node,
   Loci::entitySet faces = Loci::interval(0, face2node.size()-1);
   Loci::store<int> fcount;
   fcount.allocate(faces);
-  for(unsigned int i = 0; i < face2node.size(); i++){
+  for(size_t i = 0; i < face2node.size(); i++){
     fcount[i] = face2node[i].size();
   }
   Loci::multiMap f2n;
   f2n.allocate(fcount);
-  for(unsigned int i = 0; i < face2node.size(); i++){
+  for(size_t i = 0; i < face2node.size(); i++){
     for( int j = 0; j < fcount[i]; j++){
       f2n[i][j] = face2node[i][j];
     }
@@ -2205,7 +2205,7 @@ int main(int ac, char *av[]) {
     int num = int(i) ;
     H5Awrite(att_id,H5T_NATIVE_INT,&num) ;
     H5Aclose(att_id) ;
-    Loci::HDF5_WriteDomain(vol_id,volTags[i].second) ;
+    Loci::HDF5_WriteDomain(vol_id,volTags[i].second, MPI_COMM_WORLD) ;
     H5Gclose(vol_id) ;
   }
   H5Gclose(cell_info) ;

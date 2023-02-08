@@ -78,6 +78,7 @@ typedef double metisreal_t ;
 
 namespace Loci {
   extern  bool useDomainKeySpaces  ;
+
   //#define MEMDIAG
   
 #ifdef MEMDIAG
@@ -92,12 +93,6 @@ namespace Loci {
 
   beginexec hackit;
 #endif
-  extern void ORBPartition(const vector<vector3d<float> > &pnts,
-                           vector<int> &procid,
-                           MPI_Comm comm) ;
-
-  bool redistribute_cell_weight(storeRepP old_store, storeRepP new_store);
-  extern vector<entitySet> simplePartition(int mn, int mx, MPI_Comm comm);
   void memSpace(string s) {
 #ifdef MEMDIAG
 
@@ -117,6 +112,14 @@ namespace Loci {
     debugout.flush() ;
 #endif
   }
+
+  extern void ORBPartition(const vector<vector3d<float> > &pnts,
+                           vector<int> &procid,
+                           MPI_Comm comm) ;
+
+  bool redistribute_cell_weight(storeRepP old_store, storeRepP new_store);
+
+  extern vector<entitySet> simplePartition(int mn, int mx, MPI_Comm comm);
   extern bool use_simple_partition ;
   extern bool use_orb_partition ;
   extern bool use_sfc_partition ;
@@ -127,6 +130,8 @@ namespace Loci {
   //Assumption: We follow the convention that boundary cells are always on right side
   //of a face.
 
+  extern bool use_parallel_io  ; 
+
   template<class T> void readVectorDist(hid_t group_id,
                                         const char *vector_name,
                                         vector<long> sizes,
@@ -135,7 +140,7 @@ namespace Loci {
     hid_t dataset = 0 ;
     hid_t dspace = 0 ;
 
-    if(MPI_rank == 0) {
+    if(use_parallel_io || MPI_rank == 0) {
 #ifdef H5_USE_16_API
       dataset = H5Dopen(group_id,vector_name) ;
 #else
@@ -149,9 +154,10 @@ namespace Loci {
     }
     v.resize(sizes[MPI_rank]) ;
 
-    if(MPI_rank == 0) { // read in vector from processor 0, send to other
-      // processors
-      long lsz = sizes[0] ;
+    if(use_parallel_io) {
+      // each process read in vector 
+      
+      long lsz = sizes[MPI_rank] ;
 
       hsize_t dimension = lsz ;
       hsize_t count = dimension ;
@@ -162,8 +168,10 @@ namespace Loci {
       hssize_t start = 0 ;
 #endif
 
+      //each process has different start
+      for(int i = 0; i < MPI_rank; i++) start +=  sizes[i];
       H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
-      start += dimension  ;
+     
 
       int rank = 1 ;
       hid_t memspace = H5Screate_simple(rank,&dimension,NULL) ;
@@ -179,53 +187,86 @@ namespace Loci {
         Loci::Abort() ;
       }
       H5Sclose(memspace) ;
-
-      // now read in remaining processor segments and send to corresponding
-      // processor
-      for(int i=1;i<MPI_processes;++i) {
-        // read in remote processor data
-        long sz = sizes[i] ;
-        vector<T> tmp(sz) ;
-        if(sz > 0) {
-          dimension = sz ;
-          count = dimension ;
-          H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
-          start += dimension  ;
-          
-          memspace = H5Screate_simple(rank,&dimension,NULL) ;
-          hid_t err = H5Dread(dataset,datatype,memspace,dspace,H5P_DEFAULT,
-                              &tmp[0]) ;
-          if(err < 0) {
-            cerr << "H5Dread() failed" << endl ;
-            FATAL(err < 0) ;
-            Loci::Abort() ;
-          }
-          H5Sclose(memspace) ;
-        }
-        // send to remote processor
-        MPI_Send(&tmp[0],sz*sizeof(T),MPI_BYTE,1,0,MPI_COMM_WORLD) ;
-
-      }
       H5Dclose(dataset) ;
       H5Sclose(dspace) ;
 
     } else {
-      long size = sizes[MPI_rank] ;
-      //      if(size > 0) {
-      MPI_Status status ;
-      MPI_Recv(&v[0],size*sizeof(T),MPI_BYTE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
-      //      }
-      for(int i=MPI_rank+1;i<MPI_processes;++i) {
-        long lsz = sizes[i] ;
-        vector<T> tmp(lsz) ;
-        MPI_Recv(&tmp[0],lsz*sizeof(T),MPI_BYTE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
-        MPI_Send(&tmp[0],lsz*sizeof(T),MPI_BYTE,MPI_rank+1,0,MPI_COMM_WORLD) ;
+      if(MPI_rank == 0) { // read in vector from processor 0, send to other
+	// processors
+	long lsz = sizes[0] ;
+
+	hsize_t dimension = lsz ;
+	hsize_t count = dimension ;
+	hsize_t stride = 1 ;
+#ifdef H5_INTERFACE_1_6_4
+	hsize_t start = 0 ;
+#else
+	hssize_t start = 0 ;
+#endif
+
+	H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
+	start += dimension  ;
+
+	int rank = 1 ;
+	hid_t memspace = H5Screate_simple(rank,&dimension,NULL) ;
+
+	typedef data_schema_traits<T> traits_type ;
+	Loci::DatatypeP dp = traits_type::get_type() ;
+	hid_t datatype = dp->get_hdf5_type() ;
+	hid_t err = H5Dread(dataset,datatype,memspace,dspace,H5P_DEFAULT,
+			    &v[0]) ;
+	if(err < 0) {
+	  cerr << "H5Dread() failed" << endl ;
+	  FATAL(err < 0) ;
+	  Loci::Abort() ;
+	}
+	H5Sclose(memspace) ;
+
+	// now read in remaining processor segments and send to corresponding
+	// processor
+	for(int i=1;i<MPI_processes;++i) {
+	  // read in remote processor data
+	  long sz = sizes[i] ;
+	  vector<T> tmp(sz) ;
+	  if(sz > 0) {
+	    dimension = sz ;
+	    count = dimension ;
+	    H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
+	    start += dimension  ;
+	    
+	    memspace = H5Screate_simple(rank,&dimension,NULL) ;
+	    hid_t err = H5Dread(dataset,datatype,memspace,dspace,H5P_DEFAULT,
+				&tmp[0]) ;
+	    if(err < 0) {
+	      cerr << "H5Dread() failed" << endl ;
+	      FATAL(err < 0) ;
+	      Loci::Abort() ;
+	    }
+	    H5Sclose(memspace) ;
+	  }
+	  // send to remote processor
+	  MPI_Send(&tmp[0],sz*sizeof(T),MPI_BYTE,1,0,MPI_COMM_WORLD) ;
+	  
+	}
+	H5Dclose(dataset) ;
+	H5Sclose(dspace) ;
+	
+      } else {
+	long size = sizes[MPI_rank] ;
+	//      if(size > 0) {
+	MPI_Status status ;
+	MPI_Recv(&v[0],size*sizeof(T),MPI_BYTE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
+	//      }
+	for(int i=MPI_rank+1;i<MPI_processes;++i) {
+	  long lsz = sizes[i] ;
+	  vector<T> tmp(lsz) ;
+	  MPI_Recv(&tmp[0],lsz*sizeof(T),MPI_BYTE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
+	  MPI_Send(&tmp[0],lsz*sizeof(T),MPI_BYTE,MPI_rank+1,0,MPI_COMM_WORLD) ;
+	}
       }
     }
   }
   
-
-
   int getClusterNumFaces(unsigned char *cluster) {
     int num_faces = 0 ;
     while(*cluster != 0) {
@@ -341,6 +382,8 @@ namespace Loci {
 
   bool readBCfromVOG(string filename,
                      vector<pair<int,string> > &boundary_ids) {
+    /*process 0 read in boundary_ids and broadcast it to all prcesses*/
+    
     hid_t file_id = 0 ;
     int failure = 0 ; // No failure
     /* Save old error handler */
@@ -531,6 +574,7 @@ namespace Loci {
     return true ;
   }
 
+
   //Description: Reads grid structures from grid file in the .vog format.
   //Input: file name and max_alloc (starting of entity assignment - node base)
   //Output:
@@ -564,7 +608,7 @@ namespace Loci {
     H5E_auto_t old_func = 0 ;
     void *old_client_data = 0 ;
     vector<pair<int,string> > boundary_ids ;
-    if(MPI_rank == 0) {
+    if(use_parallel_io || MPI_rank == 0) {
 #ifdef H5_USE_16_API
       H5Eget_auto(&old_func, &old_client_data);
       /* Turn off error handling */
@@ -574,11 +618,19 @@ namespace Loci {
       /* Turn off error handling */
       H5Eset_auto(H5E_DEFAULT,NULL, NULL);
 #endif
+    }
+    
+    //    file_id = H5Fopen(filename.c_str(),H5F_ACC_RDONLY,H5P_DEFAULT) ;
+    file_id = readVOGOpen(filename) ;
+    if(MPI_rank == 0 && file_id <= 0) 
+      failure = 1 ;
 
-      file_id = H5Fopen(filename.c_str(),H5F_ACC_RDONLY,H5P_DEFAULT) ;
-      if(file_id <= 0) 
-        failure = 1 ;
-      
+    int fail_state = 0 ;
+    MPI_Allreduce(&failure,&fail_state,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
+    if(fail_state != 0)
+      return false ;
+     
+    if(use_parallel_io || MPI_rank == 0) {
 #ifdef H5_USE_16_API
       face_g = H5Gopen(file_id,"face_info") ;
       node_g = H5Gopen(file_id,"node_info") ;
@@ -618,7 +670,42 @@ namespace Loci {
         }
         H5Gclose(bc_g) ;
       }
+    }
+    if(!use_parallel_io) {
+      // In the serial I/O case we need to broadcast
+      // Share boundary tag data with all other processors
+      int bsz = boundary_ids.size() ;
+      MPI_Bcast(&bsz,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      if(bsz > 0) {
+	string buf ;
+	if(MPI_rank == 0) {
+	  ostringstream oss ;
+	  
+	  for(int i=0;i<bsz;++i)
+	    oss << boundary_ids[i].first << ' ' << boundary_ids[i].second << ' ';
+	  buf = oss.str() ;
+	}
+	int bufsz = buf.size() ;
+	MPI_Bcast(&bufsz,1,MPI_INT,0,MPI_COMM_WORLD) ;
+	char *data = new char[bufsz+1] ;
+	if(MPI_rank == 0)
+	  strcpy(data,buf.c_str()) ;
+	MPI_Bcast(data,bufsz+1,MPI_CHAR,0,MPI_COMM_WORLD) ;
+	buf = string(data) ;
+	istringstream iss(buf) ;
+	delete[] data ;
+	boundary_ids.clear() ;
+	for(int i=0;i<bsz;++i) {
+	  int id ;
+	  string name ;
+	  iss >> id >> name ;
+	  boundary_ids.push_back(pair<int,string>(id,name)) ;
+	}
+      }
+    }
 
+    int nodes_base = max_alloc ;
+    if(use_parallel_io) {
       // First read in and disribute node positions...
 #ifdef H5_USE_16_API
       dataset = H5Dopen(node_g,"positions") ;
@@ -627,161 +714,224 @@ namespace Loci {
 #endif
       dspace = H5Dget_space(dataset) ;
       if(dataset <=0 || dspace <=0)
-        failure = 1 ;
+	failure = 1 ;
         
       hsize_t size = 0 ;
       H5Sget_simple_extent_dims(dspace,&size,NULL) ;
       nnodes = size ;
-
-    }
-    int fail_state = 0 ;
-    MPI_Allreduce(&failure,&fail_state,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
-    if(fail_state != 0)
-      return false ;
-    // Share boundary tag data with all other processors
-    int bsz = boundary_ids.size() ;
-    MPI_Bcast(&bsz,1,MPI_INT,0,MPI_COMM_WORLD) ;
-    if(bsz > 0) {
-      string buf ;
-      if(MPI_rank == 0) {
-        ostringstream oss ;
-        
-        for(int i=0;i<bsz;++i)
-          oss << boundary_ids[i].first << ' ' << boundary_ids[i].second << ' ';
-        buf = oss.str() ;
-      }
-      int bufsz = buf.size() ;
-      MPI_Bcast(&bufsz,1,MPI_INT,0,MPI_COMM_WORLD) ;
-      char *data = new char[bufsz+1] ;
-      if(MPI_rank == 0)
-        strcpy(data,buf.c_str()) ;
-      MPI_Bcast(data,bufsz+1,MPI_CHAR,0,MPI_COMM_WORLD) ;
-      buf = string(data) ;
-      istringstream iss(buf) ;
-      delete[] data ;
-      boundary_ids.clear() ;
-      for(int i=0;i<bsz;++i) {
-        int id ;
-        string name ;
-        iss >> id >> name ;
-        boundary_ids.push_back(pair<int,string>(id,name)) ;
-      }
-    }
+      //each process know nnode now
+    
+      //make sure no process failed
+      fail_state = 0 ;
+      MPI_Allreduce(&failure,&fail_state,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
+      if(fail_state != 0)
+	return false ;
       
-    MPI_Bcast(&nnodes,1,MPI_LONG,0,MPI_COMM_WORLD) ;
+      //no need to share boundary_ids and nnode
 
-    // create node allocation
-    long npnts = nnodes ;
-    int node_ivl = npnts / Loci::MPI_processes;
-    int node_ivl_rem = npnts % Loci::MPI_processes ;
-    int node_accum = 0 ;
-    int nodes_base = max_alloc ;
-    for(int i = 0; i < Loci::MPI_processes; ++i) {
-      int node_accum_update = node_accum + node_ivl + ((i<node_ivl_rem)?1:0) ;
-      if(i == Loci::MPI_processes-1) {
-	local_nodes[i] = interval(nodes_base + node_accum,
-                                  nodes_base + npnts - 1) ;
-      } else {
-	local_nodes[i] = interval(nodes_base + node_accum,
-                                  nodes_base + node_accum_update - 1) ;
+      // create node allocation
+      long npnts = nnodes ;
+      int node_ivl = npnts / Loci::MPI_processes;
+      int node_ivl_rem = npnts % Loci::MPI_processes ;
+      int node_accum = 0 ;
+      for(int i = 0; i < Loci::MPI_processes; ++i) {
+	int node_accum_update = node_accum + node_ivl + ((i<node_ivl_rem)?1:0) ;
+	if(i == Loci::MPI_processes-1) {
+	  local_nodes[i] = interval(nodes_base + node_accum,
+				    nodes_base + npnts - 1) ;
+	} else {
+	  local_nodes[i] = interval(nodes_base + node_accum,
+				    nodes_base + node_accum_update - 1) ;
+	}
+	node_accum = node_accum_update ;
       }
-      node_accum = node_accum_update ;
-    }
 
-    pos.allocate(local_nodes[MPI_rank]) ;
-    if(MPI_rank == 0) { // read in node positions, send to other processors
-      memSpace("Read in Pos") ;
-      // read processor zero section first
-      int lst = local_nodes[MPI_rank].Min() ;
-      int lsz = local_nodes[0].size() ;
+      pos.allocate(local_nodes[MPI_rank]) ;
 
-      hsize_t dimension = lsz ;
-      hsize_t count = dimension ;
-      hsize_t stride = 1 ;
+    
+
+      { // each process read in node positions,
+	REPORTMEM() ;
+	// read processor zero section first
+	int lst = local_nodes[MPI_rank].Min() ;
+	int lsz = local_nodes[MPI_rank].size() ;
+	
+	hsize_t dimension = lsz ;
+	hsize_t count = dimension ;
+	hsize_t stride = 1 ;
 #ifdef H5_INTERFACE_1_6_4
-      hsize_t start = 0 ;
+	hsize_t start = 0 ;
 #else
-      hssize_t start = 0 ;
+	hssize_t start = 0 ;
 #endif
 
-      H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
-      start += dimension  ;
-
-      int rank = 1 ;
-      hid_t memspace = H5Screate_simple(rank,&dimension,NULL) ;
-      typedef data_schema_traits<vector3d<double> > traits_type ;
-      DatatypeP dp = traits_type::get_type() ;
-      hid_t datatype = dp->get_hdf5_type() ;
-      hid_t err = H5Dread(dataset,datatype,memspace,dspace,H5P_DEFAULT,
-                          &pos[lst]) ;
-      if(err < 0) {
-        cerr << "H5Dread() failed" << endl ;
-        FATAL(err < 0) ;
-        Loci::Abort() ;
-      }
-      H5Sclose(memspace) ;
-
-      // now read in remaining processor segments and send to corresponding
-      // processor
-      size_t mxsz = local_nodes[0].size() ;
-      for(int i=0;i<MPI_processes;++i)
-        mxsz = max(size_t(local_nodes[i].size()),mxsz) ;
+	//each process has different start
+	for(int i = 0; i < MPI_rank; i++){
+	  start += local_nodes[i].size();
+	}
+	H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
       
-      for(int i=1;i<MPI_processes;++i) {
-        // read in remote processor data
-        int sz = local_nodes[i].size() ;
-        if(sz == 0) {
-          cerr << "sending a zero sized block" << endl ;
-        }
-        vector<vector3d<double> > tpos(sz) ;
+	int rank = 1 ;
+	hid_t memspace = H5Screate_simple(rank,&dimension,NULL) ;
+	typedef data_schema_traits<vector3d<double> > traits_type ;
+	DatatypeP dp = traits_type::get_type() ;
+	hid_t datatype = dp->get_hdf5_type() ;
+	hid_t xfer_plist = H5P_DEFAULT ;
+
+
+        xfer_plist= create_xfer_plist(Loci::hdf5_const::dxfer_coll_type) ;
+
+	hid_t err = H5Dread(dataset,datatype,memspace,dspace,xfer_plist,
+			    &pos[lst]) ;
+	if(err < 0) {
+	  cerr << "H5Dread() failed" << endl ;
+	  FATAL(err < 0) ;
+	  Loci::Abort() ;
+	}
+	if(xfer_plist != H5P_DEFAULT)
+	  H5Pclose(xfer_plist) ;
+	H5Sclose(memspace) ;
+      
+	H5Sclose(dspace) ;
+	H5Dclose(dataset) ;
+	H5Gclose(node_g) ;
+      }
+    } else { //end of parallel io version
+      // First read in and disribute node positions (serial case)
+      if(MPI_rank == 0) {
+#ifdef H5_USE_16_API
+	dataset = H5Dopen(node_g,"positions") ;
+#else
+	dataset = H5Dopen(node_g,"positions",H5P_DEFAULT) ;
+#endif
+	dspace = H5Dget_space(dataset) ;
+	if(dataset <=0 || dspace <=0)
+	  failure = 1 ;
         
-        dimension = sz ;
-        count = dimension ;
-        H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
-        start += dimension  ;
-
-        memspace = H5Screate_simple(rank,&dimension,NULL) ;
-        hid_t err = H5Dread(dataset,datatype,memspace,dspace,H5P_DEFAULT,
-                            &tpos[0]) ;
-        if(err < 0) {
-          cerr << "H5Dread() failed" << endl ;
-          FATAL(err < 0) ;
-          Loci::Abort() ;
-        }
-        H5Sclose(memspace) ;
-
-        // send to remote processor
-        MPI_Send(&tpos[0],sz*3,MPI_DOUBLE,1,0,MPI_COMM_WORLD) ;
+	hsize_t size = 0 ;
+	H5Sget_simple_extent_dims(dspace,&size,NULL) ;
+	nnodes = size ;
       }
+
+      MPI_Allreduce(&failure,&fail_state,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
+      if(fail_state != 0)
+	return false ;
       
-      H5Sclose(dspace) ;
-      H5Dclose(dataset) ;
-      H5Gclose(node_g) ;
-    } else {
-      // Receive nodes from root processor
-      FATAL(local_nodes[MPI_rank].num_intervals()!=1) ;
-      int start = local_nodes[MPI_rank].Min() ;
-      int size = local_nodes[MPI_rank].size() ;
-      MPI_Status status ;
-      MPI_Recv(&pos[start],size*3,MPI_DOUBLE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
-      int mxsz = 0 ;
-      for(int i=MPI_rank+1;i<MPI_processes;++i) {
-        int lsz = local_nodes[i].size() ;
-        mxsz = max(mxsz,lsz) ;
+      MPI_Bcast(&nnodes,1,MPI_LONG,0,MPI_COMM_WORLD) ;
+
+      // create node allocation
+      long npnts = nnodes ;
+      int node_ivl = npnts / Loci::MPI_processes;
+      int node_ivl_rem = npnts % Loci::MPI_processes ;
+      int node_accum = 0 ;
+
+      for(int i = 0; i < Loci::MPI_processes; ++i) {
+	int node_accum_update = node_accum + node_ivl + ((i<node_ivl_rem)?1:0) ;
+	if(i == Loci::MPI_processes-1) {
+	  local_nodes[i] = interval(nodes_base + node_accum,
+				    nodes_base + npnts - 1) ;
+	} else {
+	  local_nodes[i] = interval(nodes_base + node_accum,
+				    nodes_base + node_accum_update - 1) ;
+	}
+	node_accum = node_accum_update ;
       }
 
-      vector<vector3d<double> > tpos(mxsz) ;
-      // Shift remaining ones into place
-      for(int i=MPI_rank+1;i<MPI_processes;++i) {
-        int lsz = local_nodes[i].size() ;
-        MPI_Recv(&tpos[0],lsz*3,MPI_DOUBLE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
-        int count = 0 ;
-        MPI_Get_count(&status,MPI_DOUBLE,&count) ;
-        if(count != lsz*3) {
-          cerr << "processor" << MPI_rank << " recieved " << count <<
-            " words but was expecting " << lsz*3 << endl ;
-        }
-        MPI_Send(&tpos[0],lsz*3,MPI_DOUBLE,MPI_rank+1,0,MPI_COMM_WORLD) ;
+      pos.allocate(local_nodes[MPI_rank]) ;
+      if(MPI_rank == 0) { // read in node positions, send to other processors
+	REPORTMEM() ;
+	// read processor zero section first
+	int lst = local_nodes[MPI_rank].Min() ;
+	int lsz = local_nodes[0].size() ;
+	
+	hsize_t dimension = lsz ;
+	hsize_t count = dimension ;
+	hsize_t stride = 1 ;
+#ifdef H5_INTERFACE_1_6_4
+	hsize_t start = 0 ;
+#else
+	hssize_t start = 0 ;
+#endif
+	
+	H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
+	start += dimension  ;
+
+	int rank = 1 ;
+	hid_t memspace = H5Screate_simple(rank,&dimension,NULL) ;
+	typedef data_schema_traits<vector3d<double> > traits_type ;
+	DatatypeP dp = traits_type::get_type() ;
+	hid_t datatype = dp->get_hdf5_type() ;
+	hid_t err = H5Dread(dataset,datatype,memspace,dspace,H5P_DEFAULT,
+			    &pos[lst]) ;
+	if(err < 0) {
+	  cerr << "H5Dread() failed" << endl ;
+	  FATAL(err < 0) ;
+	  Loci::Abort() ;
+	}
+	H5Sclose(memspace) ;
+
+	// now read in remaining processor segments and send to corresponding
+	// processor
+	size_t mxsz = local_nodes[0].size() ;
+	for(int i=0;i<MPI_processes;++i)
+	  mxsz = max(size_t(local_nodes[i].size()),mxsz) ;
+      
+	for(int i=1;i<MPI_processes;++i) {
+	  // read in remote processor data
+	  int sz = local_nodes[i].size() ;
+	  if(sz == 0) {
+	    cerr << "sending a zero sized block" << endl ;
+	  }
+	  vector<vector3d<double> > tpos(sz) ;
+	  
+	  dimension = sz ;
+	  count = dimension ;
+	  H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count, NULL) ;
+	  start += dimension  ;
+	  
+	  memspace = H5Screate_simple(rank,&dimension,NULL) ;
+	  hid_t err = H5Dread(dataset,datatype,memspace,dspace,H5P_DEFAULT,
+			      &tpos[0]) ;
+	  if(err < 0) {
+	    cerr << "H5Dread() failed" << endl ;
+	    FATAL(err < 0) ;
+	    Loci::Abort() ;
+	  }
+	  H5Sclose(memspace) ;
+
+	  // send to remote processor
+	  MPI_Send(&tpos[0],sz*3,MPI_DOUBLE,1,0,MPI_COMM_WORLD) ;
+	}
+      
+	H5Sclose(dspace) ;
+	H5Dclose(dataset) ;
+	H5Gclose(node_g) ;
+      } else { // non-root nodes send recieve each part from rank 0
+	// Receive nodes from root processor
+	FATAL(local_nodes[MPI_rank].num_intervals()!=1) ;
+	int start = local_nodes[MPI_rank].Min() ;
+	int size = local_nodes[MPI_rank].size() ;
+	MPI_Status status ;
+	MPI_Recv(&pos[start],size*3,MPI_DOUBLE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
+	int mxsz = 0 ;
+	for(int i=MPI_rank+1;i<MPI_processes;++i) {
+	  int lsz = local_nodes[i].size() ;
+	  mxsz = max(mxsz,lsz) ;
+	}
+
+	vector<vector3d<double> > tpos(mxsz) ;
+	// Shift remaining ones into place
+	for(int i=MPI_rank+1;i<MPI_processes;++i) {
+	  int lsz = local_nodes[i].size() ;
+	  MPI_Recv(&tpos[0],lsz*3,MPI_DOUBLE,MPI_rank-1,0,MPI_COMM_WORLD,&status) ;
+	  int count = 0 ;
+	  MPI_Get_count(&status,MPI_DOUBLE,&count) ;
+	  if(count != lsz*3) {
+	    cerr << "processor" << MPI_rank << " recieved " << count <<
+	      " words but was expecting " << lsz*3 << endl ;
+	  }
+	  MPI_Send(&tpos[0],lsz*3,MPI_DOUBLE,MPI_rank+1,0,MPI_COMM_WORLD) ;
+	}
       }
     }
 
@@ -789,7 +939,7 @@ namespace Loci {
     vector<unsigned short> cluster_sizes ;
     // Now read in face clusters
     long nclusters = 0 ;
-    if(MPI_rank == 0) {
+    if(use_parallel_io || MPI_rank == 0) {
 #ifdef H5_USE_16_API
       dataset = H5Dopen(face_g,"cluster_sizes") ;
 #else
@@ -803,7 +953,13 @@ namespace Loci {
       H5Sget_simple_extent_dims(dspace,&size,NULL) ;
       nclusters = size ;
     }
-    MPI_Bcast(&nclusters,1,MPI_LONG,0,MPI_COMM_WORLD) ;
+    
+    MPI_Allreduce(&failure,&fail_state,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
+    if(fail_state != 0)
+      return false ;
+    
+    if(!use_parallel_io)
+      MPI_Bcast(&nclusters,1,MPI_LONG,0,MPI_COMM_WORLD) ;
 
     vector<long> cluster_dist(MPI_processes,0) ;
     long sum = 0 ;
@@ -813,9 +969,9 @@ namespace Loci {
       sum += cluster_dist[i] ;
     }
     FATAL(sum != nclusters) ;
-    memSpace("before face cluster size reading" ) ;
+    REPORTMEM() ;
     readVectorDist(face_g,"cluster_sizes",cluster_dist,cluster_sizes) ;
-
+    
     long cluster_info_size = 0 ;
     for(size_t i=0;i<cluster_sizes.size();++i)
       cluster_info_size += cluster_sizes[i] ;
@@ -825,49 +981,51 @@ namespace Loci {
                   &cluster_dist[0],sizeof(long),MPI_BYTE,
                   MPI_COMM_WORLD) ;
 
-    memSpace("before face cluster reading" ) ;
-    readVectorDist(face_g,"cluster_info",cluster_dist,cluster_info) ;
 
-    memSpace("after face cluster reading" ) ;
+    REPORTMEM() ;
+    readVectorDist(face_g,"cluster_info",cluster_dist,cluster_info) ;
+    REPORTMEM() ;
 
     // Read in volume tag information
     vector<pair<string,Loci::entitySet> > volDat ;
-    if(MPI_rank == 0) {
+    if(use_parallel_io || MPI_rank == 0) {
       readVolTags(file_id,volDat) ;
     }
-    int nvtags = volDat.size() ;
-    MPI_Bcast(&nvtags,1,MPI_INT,0,MPI_COMM_WORLD) ;
-    for(int i=0;i<nvtags;++i) {
-      int sz = 0 ;
-      if(MPI_rank == 0) sz = volDat[i].first.size() ;
-      MPI_Bcast(&sz,1,MPI_INT,0,MPI_COMM_WORLD) ;
-      char *buf = new char[sz+1] ;
-      buf[sz] = '\0' ;
-      if(MPI_rank == 0) strcpy(buf,volDat[i].first.c_str()) ;
-      MPI_Bcast(buf,sz,MPI_CHAR,0,MPI_COMM_WORLD) ;
-      string name = string(buf) ;
-      delete[] buf ;
-      int nivals = 0 ;
-      if(MPI_rank == 0) nivals = volDat[i].second.num_intervals() ;
-      MPI_Bcast(&nivals,1,MPI_INT,0,MPI_COMM_WORLD) ;
-
-      int *ibuf = new int[nivals*2] ;
-      if(MPI_rank == 0) 
-        for(int j=0;j<nivals;++j) {
-          ibuf[j*2]= volDat[i].second[j].first ;
-          ibuf[j*2+1]= volDat[i].second[j].second ;
-        }
-      MPI_Bcast(ibuf,nivals*2,MPI_INT,0,MPI_COMM_WORLD) ;
-      entitySet set ;
-      for(int j=0;j<nivals;++j) 
-        set += interval(ibuf[j*2],ibuf[j*2+1]) ;
-      if(MPI_rank != 0) 
-        volDat.push_back(pair<string,entitySet>(name,set)) ;
-      delete[] ibuf ;
+    if(!use_parallel_io) {
+      int nvtags = volDat.size() ;
+      MPI_Bcast(&nvtags,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      for(int i=0;i<nvtags;++i) {
+	int sz = 0 ;
+	if(MPI_rank == 0) sz = volDat[i].first.size() ;
+	MPI_Bcast(&sz,1,MPI_INT,0,MPI_COMM_WORLD) ;
+	char *buf = new char[sz+1] ;
+	buf[sz] = '\0' ;
+	if(MPI_rank == 0) strcpy(buf,volDat[i].first.c_str()) ;
+	MPI_Bcast(buf,sz,MPI_CHAR,0,MPI_COMM_WORLD) ;
+	string name = string(buf) ;
+	delete[] buf ;
+	int nivals = 0 ;
+	if(MPI_rank == 0) nivals = volDat[i].second.num_intervals() ;
+	MPI_Bcast(&nivals,1,MPI_INT,0,MPI_COMM_WORLD) ;
+	
+	int *ibuf = new int[nivals*2] ;
+	if(MPI_rank == 0) 
+	  for(int j=0;j<nivals;++j) {
+	    ibuf[j*2]= volDat[i].second[j].first ;
+	    ibuf[j*2+1]= volDat[i].second[j].second ;
+	  }
+	MPI_Bcast(ibuf,nivals*2,MPI_INT,0,MPI_COMM_WORLD) ;
+	entitySet set ;
+	for(int j=0;j<nivals;++j) 
+	  set += interval(ibuf[j*2],ibuf[j*2+1]) ;
+	if(MPI_rank != 0) 
+	  volDat.push_back(pair<string,entitySet>(name,set)) ;
+	delete[] ibuf ;
+      }
     }
-
     volTags.swap(volDat) ;
-    if(MPI_rank == 0) {
+    
+    if(use_parallel_io || MPI_rank == 0) {
       H5Gclose(face_g) ;
       H5Fclose(file_id) ;
       /* Restore previous error handler */
@@ -877,11 +1035,12 @@ namespace Loci {
       H5Eset_auto(H5E_DEFAULT,old_func, old_client_data);
 #endif
     }
+
     MPI_Allreduce(&failure,&fail_state,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
     if(fail_state != 0)
       return false ;
-    
-    memSpace("before unpacking clusters") ;
+
+    REPORTMEM() ;
     vector<long> cluster_offset(cluster_sizes.size()+1) ;
     cluster_offset[0] = 0 ;
     for(size_t i=0;i<cluster_sizes.size();++i)
@@ -1027,7 +1186,7 @@ namespace Loci {
       Loci::debugout << endl ;
     }
 
-    memSpace("after unpacking clusters") ;
+    REPORTMEM() ;
     return true ;
   }
 
@@ -1417,11 +1576,21 @@ namespace Loci {
                            face2node.Rep()) ;
     tmp_face2node.allocate(EMPTY) ;
 
+    entitySet geom_cells = (cr.image(faces)+cl.image(faces))-bcsurfset ;
+    dstore<int> ords ;
+    int cnt = 0 ;
+    FORALL(geom_cells,cc) {
+      ords[cc] = cnt++ ;
+    } ENDFORALL ;
+    FORALL(bcsurfset,bc) { // number boundary cells last
+      ords[bc] = cnt++ ;
+    } ENDFORALL ;
+
     // sort faces
     int i=0 ;
     FORALL(faces,fc) {
-      Entity minc = max(cr[fc],cl[fc]) ;
-      sortlist[i++] = pair<Entity,Entity>(minc,fc) ;
+      Entity maxo = max(ords[cr[fc]],ords[cl[fc]]) ;
+      sortlist[i++] = pair<Entity,Entity>(maxo,fc) ;
     } ENDFORALL ;
     sort(sortlist.begin(),sortlist.end(),fieldSort) ;
     i = 0 ;
@@ -1624,13 +1793,13 @@ namespace Loci {
   
   void fill_clone_proc( map<int,int> &mapdata, entitySet &out_of_dom, std::vector<entitySet> &init_ptn) {
 
-    memSpace("fill_clone start") ;
+    REPORTMEM() ;
     vector<entitySet> recv_req(MPI_processes) ;
     for(int i=0;i<MPI_processes;++i)
       if(i!=MPI_rank) 
         recv_req[i] = out_of_dom & init_ptn[i] ;
     
-    memSpace("reqcomp") ;
+    REPORTMEM() ;
     // send the recieve requests
     int *recv_count = new int[ MPI_processes] ;
     int *send_count = new int[ MPI_processes] ;
@@ -1650,7 +1819,7 @@ namespace Loci {
     int mp = MPI_processes-1 ;
     int send_sizes = send_displacement[mp]+send_count[mp] ;
     int recv_sizes = recv_displacement[mp]+recv_count[mp] ; 
-    memSpace("before allocating send_set") ;
+    REPORTMEM() ; 
     int * send_set_buf = new int[send_sizes] ;
     int * recv_set_buf = new int[recv_sizes] ;
 
@@ -1708,7 +1877,7 @@ namespace Loci {
     send_sizes = send_displacement[mp]+send_count[mp] ;
     recv_sizes = recv_displacement[mp]+recv_count[mp] ;
     
-    memSpace("before allocating send_store") ;
+    REPORTMEM() ;
     int *send_store = new int[send_sizes] ;
     int *recv_store = new int[recv_sizes] ;
 
@@ -1729,7 +1898,7 @@ namespace Loci {
 		  recv_store, recv_count, recv_displacement, MPI_INT,
 		  MPI_COMM_WORLD) ;
     
-    memSpace("before mapdata insert") ;
+    REPORTMEM() ;
     for(int i = 0; i <  MPI_processes; ++i) {
       int loc_pack = 0 ;
       FORALL(recv_req[i],ii) {
@@ -1782,7 +1951,7 @@ namespace Loci {
       else
         boundary_faces += fc ;
     } ENDFORALL ;
-    memSpace("start face_ptn") ;
+    REPORTMEM();
     vector<int> curr_sizes(MPI_processes),tot_sizes(MPI_processes) ;
 
 
@@ -1792,7 +1961,7 @@ namespace Loci {
     int STEPS = min(MPI_processes,13);
     for(int s=0;s<STEPS;++s) {
       
-      memSpace("STEPS") ;
+      REPORTMEM();
       for(int i=0;i<MPI_processes;++i)
         curr_sizes[i] = face_ptn[i].size() ;
 
@@ -2456,7 +2625,7 @@ namespace Loci {
     //	timer_token read_file_timer = new timer_token;
     //	if(collect_perf_data)
     //		read_file_timer = perfAnalysis->start_timer("Reading in FVM Grid");
-    memSpace("readFVMGrid Start") ;
+    REPORTMEM();
     vector<entitySet> local_nodes;
     vector<entitySet> local_cells;
     vector<entitySet> local_faces;
@@ -2493,12 +2662,12 @@ namespace Loci {
       return false;
     }
     
-    memSpace("after reading grid") ;
+    REPORTMEM() ;
 
     // Identify boundary tags
 
     entitySet global_boundary_cells = tmp_boundary_tags.domain() ;
-    memSpace("after all_collect boundary cells") ;
+    REPORTMEM() ;
     
     if(MPI_processes == 1) {
 
@@ -2545,7 +2714,7 @@ namespace Loci {
       return true ;
     }
 
-    memSpace("before partitioning") ;
+    REPORTMEM() ;
 
     vector<entitySet> cell_ptn,face_ptn,node_ptn ;
 
@@ -2755,9 +2924,9 @@ namespace Loci {
 	}
       }
 
-      memSpace("mid partitioning") ;
+      REPORTMEM() ;
       face_ptn = partitionFaces(cell_ptn,tmp_cl,tmp_cr,tmp_boundary_tags) ;
-      memSpace("after partitionFaces") ;
+      REPORTMEM() ;
 
       node_ptn = partitionNodes(face_ptn,
                                 MapRepP(tmp_face2node.Rep()),
@@ -2779,7 +2948,7 @@ namespace Loci {
 	cnt = 0 ;
     } ENDFORALL ;
 
-    memSpace("after partitioning") ;
+    REPORTMEM();
       
     vector<entitySet> cell_ptn_t = transposePtn(cell_ptn) ;
     vector<entitySet> face_ptn_t = transposePtn(face_ptn) ;
@@ -2846,7 +3015,7 @@ namespace Loci {
     
     entitySet bcsurfset = facts.get_distributed_alloc(bcsurf_alloc,0).first ;// FIX THIS
     
-    memSpace("before remapGridStructures") ;
+    REPORTMEM() ;
     Map cl, cr ;
     multiMap face2node ;
     tmp_cl.Rep()->setDomainKeySpace(fk) ;
@@ -2862,7 +3031,7 @@ namespace Loci {
               nodes, faces, cells,
               pos, cl, cr, face2node,
 	      boundary_names,boundary_tags, bcsurfset, facts);
-    memSpace("after remapGridStructures") ;
+    REPORTMEM() ;
 
     facts.create_fact("cl", cl) ;
     facts.create_fact("cr", cr) ;
@@ -2897,7 +3066,7 @@ namespace Loci {
     double t2 = MPI_Wtime() ;
     debugout << "Time to read in file '" << filename << ", is " << t2-t1
              << endl ;
-    memSpace("returning from FVM grid reader") ;
+    REPORTMEM() ;
     return true ;
   }
 
@@ -3008,7 +3177,7 @@ namespace Loci {
     if(!readFVMGrid(facts,filename))
       return false ;
 
-    memSpace("before create_face_info") ;
+    REPORTMEM() ;
     create_face_info(facts) ;
 
     create_ref(facts) ;
@@ -3060,7 +3229,7 @@ namespace Loci {
       return false ;
     }
     cell_weight_store = 0;
-    memSpace("before create_face_info") ;
+    REPORTMEM() ;
     create_face_info(facts) ;
     
     create_ref(facts) ;
@@ -3092,7 +3261,7 @@ namespace Loci {
       return false ;
     }
     
-    memSpace("before create_face_info") ;
+    REPORTMEM() ;
     create_face_info(facts) ;
     
     create_ref(facts) ;

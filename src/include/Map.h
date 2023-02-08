@@ -85,7 +85,10 @@ namespace Loci {
     virtual std::istream &Input(std::istream &s) ;
     virtual void readhdf5(hid_t group_id, hid_t dataspace, hid_t dataset, hsize_t dimension, const char* name, frame_info &fi, entitySet &en) ;
     virtual void writehdf5(hid_t group_id, hid_t dataspace, hid_t dataset, hsize_t dimension, const char* name,  entitySet& en) const ;
-    
+#ifdef H5_HAVE_PARALLEL
+    virtual void readhdf5P(hid_t group_id, hid_t dataspace, hid_t dataset, hsize_t dimension, const char* name, frame_info &fi, entitySet &en, hid_t xfer_plist_id) ;
+    virtual void writehdf5P(hid_t group_id, hid_t dataspace, hid_t dataset, hsize_t dimension, const char* name,  entitySet& en, hid_t xfer_plist_id) const ;
+#endif    
     Entity * get_base_ptr() const { return base_ptr ; }
     virtual storeRepP expand(entitySet &out_of_dom, std::vector<entitySet> &init_ptn) ;
     virtual DatatypeP getType() ;
@@ -130,6 +133,8 @@ namespace Loci {
       return base_ptr[indx]; }
     Entity &operator[](Entity indx) { return elem(indx); }
     const Entity &operator[](Entity indx) const { return const_elem(indx) ; }
+    Entity &operator[](size_t indx) { return elem(indx); }
+    const Entity &operator[](size_t indx) const { return const_elem(indx) ; }
     //        operator int*() { return base_ptr; }
     std::ostream &Print(std::ostream &s) const { return Rep()->Print(s) ; }
     std::istream &Input(std::istream &s) { return Rep()->Input(s) ; }
@@ -179,6 +184,7 @@ namespace Loci {
 #endif
       return base_ptr[indx]; }
     const Entity &operator[](Entity indx) const { return const_elem(indx) ; }
+    const Entity &operator[](size_t indx) const { return const_elem(indx) ; }
     std::ostream &Print(std::ostream &s) const { return Rep()->Print(s) ; }
     int getRangeKeySpace() const { return MapRepP(Rep())->getRangeKeySpace() ; }
   } ;

@@ -1106,7 +1106,7 @@ namespace Loci {
     This method is not recursive. While loops are used to reduce the amount of
     function calling overhead.
   */
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #endif
@@ -1128,7 +1128,7 @@ namespace Loci {
     std::vector<exprP> testV;
 
     //initialize the callers depth to 1
-    int mydepth = 1;
+    //    int mydepth = 1;
 
     //temporary variable used to provide an internal count of the
     //created sub expressions. Used to create a variable name
@@ -1143,7 +1143,7 @@ namespace Loci {
         //form of this, with common sub expressions at each level
         //replaced by variable names
         //acquire the depth of the calling expression
-        mydepth = tempexpr->depth(testV);
+	//        mydepth = tempexpr->depth(testV);
 
         //temporary vector to store newly found sub expressions
         std::vector<std::pair<std::string, compiled_expr> > temp_subs;
@@ -1423,7 +1423,7 @@ namespace Loci {
       }
   }
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 

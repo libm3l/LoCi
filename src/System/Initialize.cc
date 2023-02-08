@@ -118,6 +118,14 @@ namespace Loci {
   MPI_Op MPI_FADD2_MIN ;
   MPI_Op MPI_FADD2_MAX ;
 
+  MPI_Datatype MPI_MFADD ;
+  MPI_Op MPI_MFADD_SUM ;
+  MPI_Op MPI_MFADD_PROD ;
+  MPI_Op MPI_MFADD_MIN ;
+  MPI_Op MPI_MFADD_MAX ;
+
+  MPI_Info PHDF5_MPI_Info ;
+  
   int MPI_processes = 1;
   int MPI_rank = 0 ; 
   int MPI_processes_per_host = 1 ;
@@ -181,6 +189,12 @@ namespace Loci {
   bool use_duplicate_model = false;
   bool use_simple_partition=false;
 
+#ifdef H5_HAVE_PARALLEL
+  bool use_parallel_io = false ; //true ;
+#else
+  bool use_parallel_io = false ;
+#endif
+  
   // space filling curve partitioner
 #ifdef LOCI_USE_METIS
   bool use_sfc_partition = false ;
@@ -350,6 +364,23 @@ namespace Loci {
       rinout[i] = min(rinout[i],rin[i]) ;
   }
 
+  void sumMFADd(MFADd *rin, MFADd *rinout, int *len, MPI_Datatype *dtype) {
+    for(int i=0;i<*len;++i)
+      rinout[i] += rin[i] ;
+  }
+  void prodMFADd(MFADd *rin, MFADd *rinout, int *len, MPI_Datatype *dtype) {
+    for(int i=0;i<*len;++i)
+      rinout[i] *= rin[i] ;
+  }
+  void maxMFADd(MFADd *rin, MFADd *rinout, int *len, MPI_Datatype *dtype) {
+    for(int i=0;i<*len;++i)
+      rinout[i] = max(rinout[i],rin[i]) ;
+  }
+  void minMFADd(MFADd *rin, MFADd *rinout, int *len, MPI_Datatype *dtype) {
+    for(int i=0;i<*len;++i)
+      rinout[i] = min(rinout[i],rin[i]) ;
+  }
+
   MPI_Errhandler Loci_MPI_err_handler ;
   
 
@@ -374,6 +405,7 @@ namespace Loci {
     MPI_Init(argc, argv) ;
 #endif
 
+    create_mpi_info(&PHDF5_MPI_Info) ;
 #ifndef MPI_STUBB
     {
       // Create FADD type
@@ -412,6 +444,29 @@ namespace Loci {
       MPI_Op_create((MPI_User_function *)prodFAD2d,1,&MPI_FADD2_PROD) ;
       MPI_Op_create((MPI_User_function *)maxFAD2d,1,&MPI_FADD2_MAX) ;
       MPI_Op_create((MPI_User_function *)minFAD2d,1,&MPI_FADD2_MIN) ;
+
+    }
+
+    {
+      // Create MFADD type
+      int count = MFAD_SIZE + 1 ;
+      //int blocklens[] = {1,1,1,1,1,1,1,1,1,1,1} ;
+      int blocklens[count] ;
+      for (int i=0;i<count;i++) blocklens[i] = 1 ;
+      MPI_Aint indices[count] ;
+      MFADd tmp ;
+      indices[0] = (MPI_Aint)((char *) &(tmp.value) - (char *) &tmp) ;
+      for (int i=1;i<count;i++) indices[i] = (MPI_Aint)((char *) &(tmp.grad[i-1]) - (char *) &tmp) ;
+
+      MPI_Datatype typelist[count] ;
+      for (int i=0;i<count;i++) typelist[i] = MPI_DOUBLE ;
+      MPI_Type_create_struct(count,blocklens,indices,typelist,&MPI_MFADD) ;
+      MPI_Type_commit(&MPI_MFADD) ;
+
+      MPI_Op_create((MPI_User_function *)sumMFADd,1,&MPI_MFADD_SUM) ;
+      MPI_Op_create((MPI_User_function *)prodMFADd,1,&MPI_MFADD_PROD) ;
+      MPI_Op_create((MPI_User_function *)maxMFADd,1,&MPI_MFADD_MAX) ;
+      MPI_Op_create((MPI_User_function *)minMFADd,1,&MPI_MFADD_MIN) ;
 
     }
 #endif
@@ -550,6 +605,25 @@ namespace Loci {
         } else if(!strcmp((*argv)[i],"--decoration")) {
           show_decoration = true ; // visualize the decorated multilevel graph
           i++ ;
+	} else if(!strcmp((*argv)[i],"--pio")) { // turn on parallel IO
+#ifdef H5_HAVE_PARALLEL
+	  if(MPI_processes > 1) 
+	    use_parallel_io = true ;
+	  else {
+	    use_parallel_io = false ;
+	    cerr << "Parallel I/O not used when running on a single CPU!" << endl ;
+	  }
+#else
+	  cerr << "Cannot enable parallel I/O, Loci linked with serial HDF5 library!" << endl ;
+	  use_parallel_io = false ;
+#endif
+	  i++ ;
+	} else if(!strcmp((*argv)[i],"--nopio")) { // turn off parallel IO
+#ifndef H5_HAVE_PARALLEL
+	  cerr << "Cannot disable parallel I/O, Loci linked with serial HDF5 library!" << endl ;
+#endif
+	  i++ ;
+	  use_parallel_io = false ;
         } else if(!strcmp((*argv)[i],"--simple_partition")) {
           use_simple_partition = true ; //  partition domain using n/p cuts
           i++ ;

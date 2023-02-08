@@ -587,12 +587,13 @@ namespace Loci {
     }
     return s ;
   }
-
+  
   istream &fact_db::read(istream &s) {
     bool syntax_error = false ;
     try {
       string vname ;
       parse::kill_white_space(s) ;
+
       if(s.peek()!='{') {
         throw StringError("format error in fact_db::read, missing '{'") ;
         return s ;
@@ -616,13 +617,25 @@ namespace Loci {
           throw StringError("syntax error in fact_db::read") ;
         }
         parse::kill_white_space(s) ;
+	if(s.peek() == '@') {
+	  vname += '@' ;
+	  s.get() ;
+	  parse::kill_white_space(s) ;
+	  if(parse::is_name(s)) 
+	    vname += parse::get_name(s) ;
+	  else {
+	    ostringstream oss ;
+	    oss << "syntax error in fact_db::read, no variable name after namspace '@' separator for namespace '" << vname << "'" ;
+	    throw StringError(oss.str()) ;
+	  }
+	}
+        variable var(vname) ;
         if(!parse::get_token(s,":")) {
           ostringstream oss ;
-          oss << "syntax error in fact_db::read, no ':' separator for variable '" << vname << "'" ;
+          oss << "syntax error in fact_db::read, no ':' separator for variable '" << var << "'" ;
           throw StringError(oss.str()) ;
         }
 
-        variable var(vname) ;
         if(read_vars.inSet(var)) {
           cerr << "WARNING: Variable '" << var << "' is redefined in fact_db input!!!" << endl ;
         }
@@ -689,7 +702,7 @@ namespace Loci {
 
       variable v = *targets.begin() ;
       // only process rules in current namspace
-      if(v.get_info().namespac != nspace_vec) 
+      if(nspace_vec.size()>0 &&v.get_info().namespac != nspace_vec) 
 	continue ;
       variable dpv = v ;
       while(dpv.get_info().priority.size() != 0)
@@ -752,13 +765,15 @@ namespace Loci {
           ri!=special_rules.end();++ri) {
         // first we need to create the facts in the fact_db
         variableSet targets = ri->targets() ;
+	//	Loci::debugout << "targets=" << targets << endl ;
         bool UseRule = true ;
         for(variableSet::const_iterator vi=targets.begin();
             vi!=targets.end();++vi) 
-          if(vi->get_info().namespac != nspace_vec) {
+          if(nspace_vec.size()>0 && vi->get_info().namespac != nspace_vec) {
             UseRule = false ;
           }
         if(!UseRule)
+
           continue ;
 
 
@@ -787,11 +802,36 @@ namespace Loci {
       }
       s.get() ;
       
-      variableSet read_vars ;
+      variableSet read_var_set ;
       for(;;) {
         parse::kill_white_space(s) ;
         if(s.peek() == '}') {
           s.get() ;
+	  parse::kill_white_space(s) ;
+	  if(s.peek() == '@') { // ok now we are reading in vars for a namespace
+	    s.get() ;
+	    parse::kill_white_space(s) ;
+	    vector<std::string> nspace ;
+	    while(parse::is_name(s)) {
+	      string name=parse::get_name(s) ;
+	      debugout << "name=" << name << endl ;
+	      nspace.push_back(name) ;
+	      parse::kill_white_space(s) ;
+	      if(s.peek() =='@') {
+		s.get() ;
+		parse::kill_white_space(s) ;
+	      }
+	    }
+	    // Now expecting an open brace for next var space
+	    if(s.peek() == '{') {
+	      vector<std::string> save = nspace_vec ;
+	      nspace_vec = nspace ;
+	      read_vars(s,rdb) ;
+	      nspace_vec=save ;
+	    } else {
+	      throw StringError("expecting '{' to follow namespace") ;
+	    }
+	  }
           break ;
         }
         if(s.peek() == std::char_traits<char>::eof()) {
@@ -803,6 +843,20 @@ namespace Loci {
         else {
           throw StringError("syntax error in fact_db::read") ;
         }
+        parse::kill_white_space(s) ;
+	if(s.peek() == '@') {
+	  vname += '@' ;
+	  s.get() ;
+	  parse::kill_white_space(s) ;
+	  if(parse::is_name(s)) 
+	    vname += parse::get_name(s) ;
+	  else {
+	    ostringstream oss ;
+	    oss << "syntax error in fact_db::read, no variable name after namspace '@' separator for namespace '" << vname << "'" ;
+	    throw StringError(oss.str()) ;
+	  }
+	}
+        variable var(vname) ;
         try {
           parse::kill_white_space(s) ;
           if(!parse::get_token(s,":")) {
@@ -810,10 +864,10 @@ namespace Loci {
           }
           
           variable var(vname) ;
-          if(read_vars.inSet(var)) {
+          if(read_var_set.inSet(var)) {
             cerr << "WARNING: Redefining variable '" << var << "' while reading in fact_db!!!!!" << endl ;
           }
-          read_vars += var ;
+          read_var_set += var ;
           storeRepP vp = get_variable(var) ;
           if(vp == 0) {
             vp = get_variable_type(var) ;
@@ -998,39 +1052,37 @@ namespace Loci {
     variableSet vars = get_typed_variables() ;
     read_hdf5(filename, vars) ; 
   }
+
   void fact_db::write_hdf5(const char *filename, variableSet &vars) {
     hid_t  file_id=0 ;
-    if(Loci::MPI_rank == 0) 
-      file_id =  H5Fcreate(filename, H5F_ACC_TRUNC,
-			   H5P_DEFAULT, H5P_DEFAULT) ;
-    
-    
+    file_id = Loci::hdf5CreateFile(filename, H5F_ACC_TRUNC,
+                                   H5P_DEFAULT, H5P_DEFAULT) ;
+       
     for(variableSet::const_iterator vi = vars.begin(); vi != vars.end(); ++vi) {
       storeRepP  p = get_variable(*vi) ;
       if(p->RepType() == STORE) {
         writeContainer(file_id,variable(*vi).get_info().name,p,*this) ;
       }
     }
-    if(Loci::MPI_rank == 0) 
-      H5Fclose(file_id) ;
+    hdf5CloseFile(file_id);
   }
   
   
+ 
+
   void fact_db::read_hdf5(const char *filename, variableSet &vars) {
     hid_t  file_id=0 ;
-    if(Loci::MPI_rank == 0) 
-      file_id =  H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT) ;
+    file_id =  hdf5OpenFile(filename,  H5F_ACC_RDONLY, H5P_DEFAULT);
     for(variableSet::const_iterator vi = vars.begin(); vi != vars.end(); ++vi) {
       storeRepP  p = get_variable(*vi) ;
       if(p->RepType() == STORE) {
         readContainer(file_id,variable(*vi).get_info().name,p,EMPTY,*this) ;
       }
     }
-    if(Loci::MPI_rank == 0) 
-      H5Fclose(file_id) ;
-    
+    hdf5CloseFile(file_id);
   }
 
+ 
   // experimental code to create keyspace from the
   // global registered keyspace list
   // returns "true" to indicate the methods succeeded,

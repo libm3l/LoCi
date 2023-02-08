@@ -193,6 +193,7 @@ namespace Loci {
     name = "UNNAMED" ;
     rule_impl_class = UNKNOWN ;
     rule_threading = true ;
+    gpgpu_kernel = false ;
     use_dynamic_schedule = false ;
     relaxed_recursion = false ;
     specialized_parametric = false ;
@@ -1631,6 +1632,7 @@ namespace Loci {
   register_rule_impl_list register_rule_list ;
   rule_impl_list global_rule_list ;
   
+  std::string register_module::load_nspace() const { return string("") ; }
   
   rule_impl_list::~rule_impl_list() {
     rule_list_ent *p,*v ;

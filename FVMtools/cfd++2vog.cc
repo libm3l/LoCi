@@ -27,8 +27,8 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <rpc/rpc.h>
-#include <rpc/xdr.h>
+//#include <rpc/rpc.h>
+//#include <rpc/xdr.h>
 #include <algorithm> 
 #include <vector>
 
@@ -292,7 +292,7 @@ int main(int ac, char* av[]) {
   }
 
 
-  FILE *NFP,*CFP,*BFP ;
+  FILE *NFP=0,*CFP,*BFP ;
   int mnodes = 0 ;
   const int R = MPI_rank ;
   const int P = MPI_processes ;
